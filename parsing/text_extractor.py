@@ -1,23 +1,216 @@
-import fitz  # PyMuPDF
+import fitz
 from pathlib import Path
-from parsing.text_layer_detector import detect_text_layers
+
+LANDSCAPE_RATIO = 1.0
+MIN_BOX_WIDTH = 100
+MIN_BOX_HEIGHT = 30
 
 
-def extract_text(pdf_path: str, text_layers: dict[int, bool]) -> dict[int, str]:
-    doc = fitz.open(pdf_path)
-    result = {}
-    for page_num, page in enumerate(doc, start=1):
-        if text_layers[page_num]:
-            result[page_num] = page.get_text().strip()
+def _rect_contains(outer: fitz.Rect, inner: tuple, margin: float = 3.0) -> bool:
+    x0, y0, x1, y1 = inner
+    return (x0 >= outer.x0 - margin and y0 >= outer.y0 - margin and
+            x1 <= outer.x1 + margin and y1 <= outer.y1 + margin)
+
+
+def _rects_overlap(r: fitz.Rect, other: tuple) -> bool:
+    x0, y0, x1, y1 = other
+    return not (x1 < r.x0 or x0 > r.x1 or y1 < r.y0 or y0 > r.y1)
+
+
+def _find_box_rects(page: fitz.Page, exclude: list[fitz.Rect]) -> list[fitz.Rect]:
+    boxes = []
+    for drawing in page.get_drawings():
+        if drawing.get("color") is None:
+            continue
+        rect = drawing.get("rect")
+        if rect is None:
+            continue
+        r = fitz.Rect(rect)
+        if r.width < MIN_BOX_WIDTH or r.height < MIN_BOX_HEIGHT:
+            continue
+        if any(_rect_contains(ex, (r.x0, r.y0, r.x1, r.y1)) for ex in exclude):
+            continue
+        boxes.append(r)
+    return boxes
+
+
+def _extract_cell_content(page: fitz.Page, cell_rect: fitz.Rect, img_rects: list[fitz.Rect]) -> str:
+    # 이미지 포함 셀: 텍스트 블록과 이미지를 y좌표 기준으로 정렬하여 순서 복원
+    elements = []
+    for block in page.get_text("blocks", clip=cell_rect):
+        x0, y0, x1, y1, content, _, block_type = block
+        if block_type == 0 and content.strip():
+            elements.append((y0, content.strip()))
+    for img_rect in img_rects:
+        # TODO: 멀티모달 LLM으로 이미지 설명 추출 예정
+        elements.append((img_rect.y0, "[이미지: 분석 예정]"))
+    elements.sort(key=lambda e: e[0])
+    return "\n".join(e[1] for e in elements)
+
+
+def _find_cell_for_image(img_rect: fitz.Rect, cells_flat: list) -> int | None:
+    # 이미지 중심점이 속하는 셀 인덱스 반환 (병합 셀 오매칭 방지)
+    cx = (img_rect.x0 + img_rect.x1) / 2
+    cy = (img_rect.y0 + img_rect.y1) / 2
+    for idx, cell in enumerate(cells_flat):
+        if cell is None:
+            continue
+        cr = fitz.Rect(cell)
+        if cr.x0 <= cx <= cr.x1 and cr.y0 <= cy <= cr.y1:
+            return idx
+    return None
+
+
+def _format_table(page: fitz.Page, table, all_img_rects: list[fitz.Rect]) -> str:
+    extracted = table.extract()
+
+    try:
+        cells_flat = table.cells
+    except AttributeError:
+        cells_flat = None
+
+    if not cells_flat:
+        lines = []
+        for row in extracted:
+            cells = [str(c or "").strip() for c in row]
+            lines.append(" | ".join(cells))
+        return "\n".join(lines)
+
+    # cells_flat의 x/y 좌표 경계값으로 격자 재구성
+    # (병합 셀로 인해 cells_flat 개수 != row_count * col_count이므로 flat_idx 직접 사용 불가)
+    x_coords = sorted(set(c[i] for c in cells_flat if c is not None for i in (0, 2)))
+    y_coords = sorted(set(c[i] for c in cells_flat if c is not None for i in (1, 3)))
+
+    # 이미지를 중심점 기준으로 cells_flat 인덱스에 매핑
+    cells_flat_to_imgs: dict[int, list[fitz.Rect]] = {}
+    for img_rect in all_img_rects:
+        idx = _find_cell_for_image(img_rect, cells_flat)
+        if idx is not None:
+            cells_flat_to_imgs.setdefault(idx, []).append(img_rect)
+
+    lines = []
+    for row_idx, row in enumerate(extracted):
+        row_cells = []
+        for col_idx, cell_text in enumerate(row):
+            # 격자 위치 (row_idx, col_idx)의 중심점으로 해당 cells_flat 셀 탐색
+            cell_rect = None
+            cells_flat_idx = None
+            if row_idx < len(y_coords) - 1 and col_idx < len(x_coords) - 1:
+                cy = (y_coords[row_idx] + y_coords[row_idx + 1]) / 2
+                cx = (x_coords[col_idx] + x_coords[col_idx + 1]) / 2
+                for idx, cell in enumerate(cells_flat):
+                    if cell is None:
+                        continue
+                    cr = fitz.Rect(cell)
+                    if cr.x0 <= cx <= cr.x1 and cr.y0 <= cy <= cr.y1:
+                        cell_rect = cr
+                        cells_flat_idx = idx
+                        break
+
+            cell_imgs = cells_flat_to_imgs.get(cells_flat_idx, []) if cells_flat_idx is not None else []
+
+            if cell_imgs and cell_rect is not None:
+                content = _extract_cell_content(page, cell_rect, cell_imgs)
+            else:
+                content = str(cell_text or "").strip()
+
+            row_cells.append(content)
+        lines.append(" | ".join(row_cells))
+
+    return "\n".join(lines)
+
+
+def _extract_elements(page: fitz.Page, clip: fitz.Rect = None) -> list[tuple[float, str]]:
+    elements = []
+
+    # 1. 페이지 내 모든 이미지 위치 수집
+    all_images: list[tuple[float, fitz.Rect]] = []
+    seen_xrefs = set()
+    for img in page.get_images(full=True):
+        xref = img[0]
+        if xref in seen_xrefs:
+            continue
+        seen_xrefs.add(xref)
+        for rect in page.get_image_rects(xref):
+            if clip and not clip.intersects(rect):
+                continue
+            all_images.append((rect.y0, rect))
+
+    # 2. 표 감지 및 추출 (셀 구조 보존 + 이미지 위치 유지)
+    table_rects: list[fitz.Rect] = []
+    for table in page.find_tables(clip=clip):
+        rect = fitz.Rect(table.bbox)
+        table_rects.append(rect)
+
+        inner_img_rects = [
+            img_rect for _, img_rect in all_images
+            if _rects_overlap(rect, (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1))
+        ]
+
+        formatted = _format_table(page, table, inner_img_rects)
+        if formatted.strip():
+            elements.append((rect.y0, f"[표]\n{formatted}\n[/표]"))
+
+    # 3. 표 밖 이미지만 독립 요소로 추가
+    for iy, img_rect in all_images:
+        if not any(_rects_overlap(tr, (img_rect.x0, img_rect.y0, img_rect.x1, img_rect.y1)) for tr in table_rects):
+            elements.append((iy, "[이미지: 분석 예정]"))
+
+    # 4. 박스 감지 (표 영역 제외)
+    box_rects = _find_box_rects(page, table_rects)
+    box_contents: dict[tuple, list[tuple[float, str]]] = {}
+
+    # 5. 텍스트 블록 추출
+    for block in page.get_text("blocks", clip=clip):
+        x0, y0, x1, y1, content, block_no, block_type = block
+
+        if block_type == 1:
+            continue
+
+        if any(_rect_contains(tr, (x0, y0, x1, y1)) for tr in table_rects):
+            continue
+
+        if not content.strip():
+            continue
+
+        in_box = None
+        for box_rect in box_rects:
+            if _rect_contains(box_rect, (x0, y0, x1, y1)):
+                in_box = (box_rect.x0, box_rect.y0)
+                break
+
+        if in_box:
+            box_contents.setdefault(in_box, []).append((y0, content.strip()))
         else:
-            result[page_num] = _ocr_page(page)
+            elements.append((y0, content.strip()))
+
+    # 6. 박스 텍스트 통합
+    for (_, by0), contents in box_contents.items():
+        sorted_text = "\n".join(c for _, c in sorted(contents))
+        elements.append((by0, f"[박스]\n{sorted_text}\n[/박스]"))
+
+    return sorted(elements, key=lambda e: e[0])
+
+
+def extract_page_text(page: fitz.Page) -> str:
+    w, h = page.rect.width, page.rect.height
+
+    if w / h > LANDSCAPE_RATIO:
+        mid = w / 2
+        left = _extract_elements(page, clip=fitz.Rect(0, 0, mid, h))
+        right = _extract_elements(page, clip=fitz.Rect(mid, 0, w, h))
+        elements = left + right
+    else:
+        elements = _extract_elements(page)
+
+    return "\n".join(content for _, content in elements)
+
+
+def extract_text(pdf_path: str) -> dict[int, str]:
+    doc = fitz.open(pdf_path)
+    result = {page_num: extract_page_text(page) for page_num, page in enumerate(doc, start=1)}
     doc.close()
     return result
-
-
-def _ocr_page(page) -> str:
-    # TODO: PaddleOCR 연동 예정
-    return ""
 
 
 if __name__ == "__main__":
@@ -26,16 +219,10 @@ if __name__ == "__main__":
     output_dir.mkdir(exist_ok=True)
 
     for pdf_file in sample_dir.glob("*.pdf"):
-        text_layers = detect_text_layers(str(pdf_file))
-        result = extract_text(str(pdf_file), text_layers)
-
+        result = extract_text(str(pdf_file))
         output_path = output_dir / f"{pdf_file.stem}.txt"
         with open(output_path, "w", encoding="utf-8") as f:
             for page_num, text in result.items():
-                f.write(f"\n{'='*60}\n")
-                f.write(f"{page_num}페이지\n")
-                f.write(f"{'='*60}\n")
-                f.write(text if text else "(스캔 페이지 - OCR 미구현)")
-                f.write("\n")
-
+                f.write(f"\n{'='*60}\n{page_num}페이지\n{'='*60}\n")
+                f.write(text + "\n")
         print(f"저장 완료: {output_path}")
