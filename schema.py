@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""나라장터 입찰공고 원본(API 113필드) → 큐레이션 스키마 변환.
+
+"""
+나라장터 입찰공고 원본(API 113필드) → 큐레이션 스키마 변환.
 - 첨부 20컬럼(ntceSpecDocUrl/FileNm 1~10) → attachments 배열로 접기
 - 금액 → int, 일시 → 'YYYY-MM-DD HH:MM:SS', 율 → float, Yn → bool 캐스팅
 - 빈 문자열/None 은 모두 None 으로 정규화
 """
-from datetime import datetime
 
+from datetime import datetime
 
 # ── 값 변환 헬퍼 ──────────────────────────────────────────────
 def _txt(v):

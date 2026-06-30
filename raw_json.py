@@ -14,9 +14,7 @@
 import os, json, time, logging, argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-
 import requests
-
 from schema import to_curated, parse_dt
 
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")                  # Decoding(디코딩) 키
