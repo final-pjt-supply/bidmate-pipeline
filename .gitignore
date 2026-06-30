@@ -22,3 +22,4 @@ CLAUDE.md
 
 # Sample data
 data/sample/*.pdf
+data/sample/output/
