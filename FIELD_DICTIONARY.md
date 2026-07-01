@@ -6,7 +6,7 @@
 1:1로 대응한다.
 
 - **원본 API 응답:** 업무구분당 113개 필드 (필드 선택 옵션 없음 — 호출하면 전부 반환)
-- **정제 결과:** **39개 필드** (원본 56개 채택 → 첨부 20개를 배열 1개로 통합)
+- **정제 결과:** **39개 필드** (원본 57개 채택 → 첨부 21개를 배열 1개로 통합)
 - **표본:** 채움률(%)은 2026-06-23 용역(servc) 793건 기준의 참고치다 (업무구분·일자에 따라 달라질 수 있음)
 ---
 
@@ -15,8 +15,8 @@
 | 구분 | 개수 | 비고 |
 |---|---:|---|
 | 원본 전체 | 113 | API가 반환하는 전체 필드 |
-| ├ 채택 (→ o) | 56 | 1:1 매핑 36 + 첨부 통합 20 |
-| └ 탈락 (→ x) | 57 | 빈 컬럼 16 + 중복/대체 5 + 미사용 36 |
+| ├ 채택 (→ o) | 57 | 1:1 매핑 36 + 첨부 통합 21 |
+| └ 탈락 (→ x) | 56 | 빈 컬럼 16 + 중복/대체 5 + 미사용 35 |
 | **최종 큐레이션** | **39** | 채택 36(1:1) + `attachments` 1 + 수집기 주입 2 |
 
 **변환 파이프라인:** `raw(113필드)` → `to_curated()` → `curated(39필드)`
@@ -66,7 +66,7 @@ PK = (`bid_ntce_no`, `bid_ntce_ord`) 복합키.
 | 34 | `info_biz_yn` | boolean | bool | infoBizYn | 8% | 정보화사업 여부 |
 | 35 | `bid_ntce_url` | text | text | bidNtceUrl | 100% | 입찰공고 상세 URL |
 | 36 | `chg_ntce_rsn` | text | text | chgNtceRsn | 11% | 변경/취소 사유 |
-| 37 | `attachments` | jsonb(array) | 배열화 | ntceSpecDocUrl1~10 + ntceSpecFileNm1~10 | 86%¹ | 첨부 목록 `[{file_nm, file_url}]` |
+| 37 | `attachments` | jsonb(array) | 배열화 | ntceSpecDocUrl1~10 + ntceSpecFileNm1~10 + stdNtceDocUrl | 86%¹ | 첨부 목록 `[{file_nm, file_url, kind}]` |
 | 38 | `src_biz_div` | text | 주입 | (수집기) | 100% | 업무구분(thng/cnstwk/servc/frgcpt) |
 | 39 | `collected_at` | timestamp | 주입 | (수집기) | 100% | 수집 시각 |
 
@@ -76,20 +76,23 @@ PK = (`bid_ntce_no`, `bid_ntce_ord`) 복합키.
 
 ## 3. `attachments` 구조
 
-원본의 평면 컬럼 `ntceSpecDocUrl1~10` + `ntceSpecFileNm1~10` (최대 20개)을 객체 배열로 접는다.
-URL·파일명은 항상 1:1로 동시 출현하며, 둘 중 하나라도 있으면 항목으로 추가한다.
+원본의 평면 컬럼 `ntceSpecDocUrl1~10` + `ntceSpecFileNm1~10` (최대 20개)과 표준공고서
+`stdNtceDocUrl`을 하나의 객체 배열로 접는다. 공고첨부는 URL·파일명이 항상 1:1로 동시
+출현하며, 둘 중 하나라도 있으면 항목으로 추가한다. 표준공고서는 파일명 없이 URL만 들어온다.
 
 ```json
 "attachments": [
-  { "file_nm": "1.전자수의시담 안내(원본).hwp", "file_url": "https://www.g2b.go.kr/pn/.../downloadFile.do?...&fileSeq=1..." },
-  { "file_nm": "2.전자수의시담 안내(변환본).pdf", "file_url": "https://www.g2b.go.kr/pn/.../downloadFile.do?...&fileSeq=2..." }
+  { "file_nm": "1.전자수의시담 안내(원본).hwp", "file_url": "https://www.g2b.go.kr/pn/.../downloadFile.do?...&fileSeq=1...", "kind": "공고첨부" },
+  { "file_nm": "2.전자수의시담 안내(변환본).pdf", "file_url": "https://www.g2b.go.kr/pn/.../downloadFile.do?...&fileSeq=2...", "kind": "공고첨부" },
+  { "file_nm": null, "file_url": "https://www.g2b.go.kr/pn/.../stdNtceDoc...", "kind": "표준공고서" }
 ]
 ```
 
 | 키 | 타입 | 출처 | 설명 |
 |---|---|---|---|
-| `file_nm` | text | ntceSpecFileNm{i} | 첨부 파일명 |
-| `file_url` | text | ntceSpecDocUrl{i} | 첨부 다운로드 URL (Processing Layer에서 사용) |
+| `file_nm` | text | ntceSpecFileNm{i} | 첨부 파일명 (표준공고서는 `null`) |
+| `file_url` | text | ntceSpecDocUrl{i} / stdNtceDocUrl | 첨부 다운로드 URL (Processing Layer에서 사용) |
+| `kind` | text | (분류) | `공고첨부` 또는 `표준공고서` |
 
 ---
 
@@ -109,7 +112,7 @@ URL·파일명은 항상 1:1로 동시 출현하며, 둘 중 하나라도 있으
 
 ---
 
-## 5. 탈락 필드 (→ x · 57개)
+## 5. 탈락 필드 (→ x · 56개)
 
 ### (가) 완전 빈 컬럼 — 16개 (표본 793건 전부 0%)
 
@@ -128,7 +131,7 @@ URL·파일명은 항상 1:1로 동시 출현하며, 둘 중 하나라도 있으
 | crdtrNm | 기관명 필드로 충분 |
 | sucsfbidMthdCd | 코드 대신 명칭(`sucsfbid_mthd_nm`) 채택 |
 
-### (다) 현재 미사용 — 36개 (저활용 플래그·세부절차·예가/PQ/실적 관련)
+### (다) 현재 미사용 — 35개 (저활용 플래그·세부절차·예가/PQ/실적 관련)
 
 | 원본 | 의미 | 원본 | 의미 |
 |---|---|---|---|
@@ -148,8 +151,8 @@ URL·파일명은 항상 1:1로 동시 출현하며, 둘 중 하나라도 있으
 | bidPrtcptFee | 입찰참가수수료 | drwtPrdprcNum | 추첨예가건수 |
 | opengPlce | 개찰장소 | rbidPermsnYn | 재입찰허용여부 |
 | refNo | 참조번호 | dcmtgOprtnPlce | 설명회개최장소 |
-| stdNtceDocUrl | 표준공고서류URL | dcmtgOprtnDt | 설명회개최일시 |
-| orderPlanUntyNo | 발주계획통합번호 | bfSpecRgstNo | 사전규격등록번호 |
+| dcmtgOprtnDt | 설명회개최일시 | orderPlanUntyNo | 발주계획통합번호 |
+| bfSpecRgstNo | 사전규격등록번호 |  |  |
 
 > 필요 시 (다) 그룹의 필드는 `schema.py`의 `FIELD_MAP`에 `"필드명": ("원본명", 변환함수)` 한 줄을
 > 추가하면 즉시 큐레이션에 포함된다. (예: 예가 관련 분석이 필요해지면 `totPrdprcNum`/`drwtPrdprcNum` 추가)
