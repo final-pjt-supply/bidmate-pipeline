@@ -111,7 +111,11 @@ def _attachments(record):
         file_url = _txt(record.get(f"ntceSpecDocUrl{index}"))
         file_nm = _txt(record.get(f"ntceSpecFileNm{index}"))
         if file_url or file_nm:
-            attachments.append({"file_nm": file_nm, "file_url": file_url})
+            attachments.append({"file_nm": file_nm, "file_url": file_url, "kind": "공고첨부"})
+    # 표준공고서(stdNtceDocUrl)도 다운로드 대상이므로 첨부 배열에 흡수한다.
+    std_url = _txt(record.get("stdNtceDocUrl"))
+    if std_url:
+        attachments.append({"file_nm": None, "file_url": std_url, "kind": "표준공고서"})
     return attachments
 
 

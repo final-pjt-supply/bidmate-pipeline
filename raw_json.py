@@ -1,24 +1,10 @@
 #!/usr/bin/env python3
 """
-나라장터 입찰공고 수집기.
+나라장터 입찰공고 Json 수집기.
 
 실행 방법
 - 환경변수 G2B_SERVICE_KEY에 디코딩 키를 설정
 - python3 raw_json.py --start 2026-06-01 --end 2026-06-30
-"""
-
-"""
-전체 함수 호출 흐름
-main()
-  ├─ parse_args()
-  ├─ to_day()
-  └─ collect_range()
-       ├─ fetch_all()
-       │    └─ fetch()
-       ├─ group_open_records()
-       ├─ save_json()      # raw 저장
-       └─ to_curated()     # schema.py 함수
-            └─ save_json() # curated 저장
 """
 
 #----------------------------------------------
