@@ -1,7 +1,7 @@
 import fitz
 from pathlib import Path
 
-LANDSCAPE_RATIO = 1.0
+LANDSCAPE_RATIO = 1.2
 MIN_BOX_WIDTH = 100
 MIN_BOX_HEIGHT = 30
 
@@ -225,6 +225,7 @@ def extract_page_text(
 
 
 def extract_text(pdf_path: str) -> dict:
+    # FileNotFoundError, fitz.FileDataError 등은 호출부에서 처리할 것
     doc = fitz.open(pdf_path)
     counter = {"n": 0}
     registry = {}
