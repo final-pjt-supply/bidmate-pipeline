@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.14, lxml, zipfile(stdlib), pytest.
 
+**실행 방식:** 인라인 실행(superpowers:executing-plans) — 다음 세션에서 Task 1부터 진행.
+
 ## Global Constraints
 
 - Python 3.14. 새 런타임 의존성은 `lxml`만 추가(이미 프로젝트 주요 라이브러리), 테스트용 `pytest` 추가.
