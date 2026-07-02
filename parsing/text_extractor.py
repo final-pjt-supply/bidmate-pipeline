@@ -1,7 +1,6 @@
 import fitz
-from pathlib import Path
 
-LANDSCAPE_RATIO = 1.0
+LANDSCAPE_RATIO = 1.2
 MIN_BOX_WIDTH = 100
 MIN_BOX_HEIGHT = 30
 
@@ -225,6 +224,7 @@ def extract_page_text(
 
 
 def extract_text(pdf_path: str) -> dict:
+    # FileNotFoundError, fitz.FileDataError 등은 호출부에서 처리할 것
     doc = fitz.open(pdf_path)
     counter = {"n": 0}
     registry = {}
@@ -235,23 +235,3 @@ def extract_text(pdf_path: str) -> dict:
     return {"pages": pages, "images": registry}
 
 
-if __name__ == "__main__":
-    sample_dir = Path(__file__).parent.parent / "data" / "sample"
-    output_dir = sample_dir / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    for pdf_file in sample_dir.glob("*.pdf"):
-        result = extract_text(str(pdf_file))
-        pages = result["pages"]
-        images = result["images"]
-
-        output_path = output_dir / f"{pdf_file.stem}.txt"
-        with open(output_path, "w", encoding="utf-8") as f:
-            for page_num, text in pages.items():
-                f.write(f"\n{'='*60}\n{page_num}페이지\n{'='*60}\n")
-                f.write(text + "\n")
-
-        print(f"저장 완료: {output_path}")
-        print(f"  이미지 수: {len(images)}개")
-        for img_id, meta in images.items():
-            print(f"  {img_id}: 페이지{meta['page']}, xref={meta['xref']}")
