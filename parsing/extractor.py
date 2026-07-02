@@ -39,11 +39,52 @@ SCHEMA = {
     "other_requirements":  "dict|null  — 위 항목에 해당하지 않는 기타 자격요건",
 }
 
+_FEW_SHOT = """
+[예시 공고문]
+2. 입찰참가자격
+가. 전기공사업법 제4조에 의한 전기공사업 등록업체
+나. 본 공사는 10억원 미만으로 대기업(상호출자제한기업집단) 전기공사업자는 참여할 수 없습니다.
+다. 철도신호분야(구분:시공) 필수기술인력(중급 1인, 초급 1인 이상)을 보유한 업체
+라. 본점 소재지가 전북특별자치도에 입찰공고일 기준 90일 이상 소재한 업체
+
+5. 낙찰자 결정
+적격심사하여 종합평점이 95점 이상인 자를 낙찰예정자로 결정합니다.
+시공경험: 3억원 미만 2억원 이상 일반철도신호공사 (최근 3년)
+공사기간: 착공지정일로부터 40일간
+하자보증률/기간: 2% / 2년
+
+[예시 JSON 출력]
+{
+  "company_size_limit": "대기업제외",
+  "required_licenses": ["전기공사업"],
+  "required_personnel": [
+    {"field": "철도안전전문인력", "grade": "중급", "count": 1},
+    {"field": "철도안전전문인력", "grade": "초급", "count": 1}
+  ],
+  "perf_min_amt": 200000000,
+  "perf_max_amt": 300000000,
+  "perf_period_years": 3,
+  "perf_type": "일반철도신호공사",
+  "region_limit": "전북특별자치도",
+  "region_min_days": 90,
+  "eval_cutline": 95.0,
+  "work_period": "착공지정일로부터 40일",
+  "warranty_rate": 2.0,
+  "warranty_months": 24,
+  "required_certs": null,
+  "other_requirements": null
+}
+"""
+
 _PROMPT = """아래는 공공 조달 입찰 공고문 텍스트입니다.
 JSON 스키마에 맞게 입찰 자격요건을 추출하세요.
 - 항목이 문서에 없으면 null
 - JSON만 반환, 설명 없이
 - required_personnel의 field는 전문분야, grade는 등급(고급/중급/초급)
+- "대기업 참여 불가", "상호출자제한기업 제외" 등의 표현은 company_size_limit: "대기업제외"
+- "종합평점 N점 이상", "평점 N점 이상인 자를 낙찰자로" → eval_cutline: N
+
+{few_shot}
 
 스키마:
 {schema}
@@ -53,7 +94,7 @@ JSON 스키마에 맞게 입찰 자격요건을 추출하세요.
 
 JSON:"""
 
-_MAX_TEXT_CHARS = 6000
+_MAX_TEXT_CHARS = None  # 전문 전달 (llama-3.1-8b 128k 컨텍스트 내 처리 가능)
 
 
 def _load_config() -> dict:
@@ -71,13 +112,27 @@ def _load_config() -> dict:
 
 
 def _parse_json(content: str) -> dict:
-    # 마크다운 코드블록 제거
+    import re
+    try:
+        return json.loads(content.strip())
+    except json.JSONDecodeError:
+        pass
+    # 마크다운 코드블록
     if "```" in content:
-        parts = content.split("```")
-        content = parts[1] if len(parts) > 1 else parts[0]
-        if content.startswith("json"):
-            content = content[4:]
-    return json.loads(content.strip())
+        for part in content.split("```"):
+            part = part.strip().lstrip("json").strip()
+            try:
+                return json.loads(part)
+            except json.JSONDecodeError:
+                continue
+    # 정규식으로 {...} 블록 추출
+    match = re.search(r'\{[\s\S]*\}', content)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"JSON 파싱 실패: {content[:200]}")
 
 
 def extract_qualifications(text: str) -> dict:
@@ -85,8 +140,9 @@ def extract_qualifications(text: str) -> dict:
     if not config.get("LLM_API_KEY"):
         raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
 
-    trimmed = text[:_MAX_TEXT_CHARS]
+    trimmed = text[:_MAX_TEXT_CHARS] if _MAX_TEXT_CHARS else text
     prompt = _PROMPT.format(
+        few_shot=_FEW_SHOT,
         schema=json.dumps(SCHEMA, ensure_ascii=False, indent=2),
         text=trimmed,
     )
@@ -94,7 +150,7 @@ def extract_qualifications(text: str) -> dict:
     payload = {
         "model": config["LLM_MODEL"],
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
