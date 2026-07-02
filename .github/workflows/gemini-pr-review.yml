@@ -40,5 +40,5 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          GEMINI_MODEL: "gemini-2.0-flash"
+          GEMINI_MODEL: "gemini-3.5-flash"
         run: python .github/scripts/gemini_review.py
