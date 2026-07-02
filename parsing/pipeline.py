@@ -12,9 +12,11 @@ from parsing.text_extractor import extract_text
 
 def run(pdf_path: str) -> dict:
     path = Path(pdf_path)
-    output_dir = path.parent / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    txt_path = output_dir / (path.stem + ".txt")
+    txt_dir = path.parent / "output" / "txt"
+    json_dir = path.parent / "output" / "json"
+    txt_dir.mkdir(parents=True, exist_ok=True)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    txt_path = txt_dir / (path.stem + ".txt")
 
     # 1단계: 텍스트 추출
     t0 = time.time()
@@ -31,8 +33,9 @@ def run(pdf_path: str) -> dict:
     t2 = time.time()
     print(f"[2] 자격요건 추출 완료 ({t2 - t1:.1f}초)")
 
-    print("\n--- 추출 결과 ---")
-    print(json.dumps(qualifications, ensure_ascii=False, indent=2))
+    json_path = json_dir / (path.stem + ".json")
+    json_path.write_text(json.dumps(qualifications, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[저장] {json_path.name}")
 
     return qualifications
 
