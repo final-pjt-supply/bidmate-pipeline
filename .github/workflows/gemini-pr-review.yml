@@ -24,7 +24,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --quiet requests google-auth
+        run: pip install --quiet requests
 
       - name: Get PR diff
         run: |
@@ -34,11 +34,10 @@ jobs:
 
       - name: Gemini review
         env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-          GCP_PROJECT_ID: "smooth-research-501206-d6"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          GEMINI_MODEL: "gemini-3.5-flash"
+          GEMINI_MODEL: "gemini-2.5-flash"
         run: python .github/scripts/gemini_review.py
