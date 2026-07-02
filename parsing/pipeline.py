@@ -1,34 +1,50 @@
-import fitz
+import json
+import sys
+import time
 from pathlib import Path
 
-from parsing.text_extractor import extract_text
+import fitz
+
+from parsing.extractor import extract_qualifications
 from parsing.image_describer import describe_image
+from parsing.text_extractor import extract_text
 
 
-def run(pdf_path: str, output_path: str) -> None:
+def run(pdf_path: str) -> dict:
+    path = Path(pdf_path)
+    output_dir = path.parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    txt_path = output_dir / (path.stem + ".txt")
+
+    # 1단계: 텍스트 추출
+    t0 = time.time()
     result = extract_text(pdf_path)
-    pages: dict[int, str] = result["pages"]
-    registry: dict[str, dict] = result["images"]
+    descriptions = _describe_all(pdf_path, result["images"])
+    final_pages = _replace_placeholders(result["pages"], descriptions)
+    _save(final_pages, str(txt_path))
+    t1 = time.time()
+    print(f"[1] 텍스트 추출 완료 ({t1 - t0:.1f}초) → {txt_path.name}")
 
-    descriptions = _describe_all(pdf_path, registry)
-    final_pages = _replace_placeholders(pages, descriptions)
-    _save(final_pages, output_path)
+    # 2단계: 자격요건 추출
+    full_text = txt_path.read_text(encoding="utf-8")
+    qualifications = extract_qualifications(full_text)
+    t2 = time.time()
+    print(f"[2] 자격요건 추출 완료 ({t2 - t1:.1f}초)")
 
-    print(f"저장 완료: {output_path}")
-    print(f"  이미지 수: {len(registry)}개")
+    print("\n--- 추출 결과 ---")
+    print(json.dumps(qualifications, ensure_ascii=False, indent=2))
+
+    return qualifications
 
 
 def _describe_all(pdf_path: str, registry: dict) -> dict[str, str]:
     if not registry:
         return {}
-
     doc = fitz.open(pdf_path)
     descriptions = {}
     for img_id, meta in registry.items():
         img_data = doc.extract_image(meta["xref"])
-        desc = describe_image(img_data["image"], img_id, meta["page"])
-        descriptions[img_id] = desc
-        print(f"  {img_id} 처리 완료 (페이지 {meta['page']})")
+        descriptions[img_id] = describe_image(img_data["image"], img_id, meta["page"])
     doc.close()
     return descriptions
 
@@ -43,7 +59,6 @@ def _replace_placeholders(pages: dict, descriptions: dict) -> dict[int, str]:
 
 
 def _save(pages: dict, output_path: str) -> None:
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         for page_num, text in pages.items():
             f.write(f"\n{'='*60}\n{page_num}페이지\n{'='*60}\n")
@@ -51,11 +66,10 @@ def _save(pages: dict, output_path: str) -> None:
 
 
 if __name__ == "__main__":
-    sample_dir = Path(__file__).parent.parent / "data" / "sample"
-    output_dir = sample_dir / "output"
-
-    for pdf_file in sample_dir.glob("*.pdf"):
-        run(
-            pdf_path=str(pdf_file),
-            output_path=str(output_dir / f"{pdf_file.stem}.txt"),
-        )
+    if len(sys.argv) < 2:
+        sample_dir = Path(__file__).parent.parent / "data" / "sample"
+        for pdf_file in sample_dir.glob("*.pdf"):
+            print(f"\n=== {pdf_file.name} ===")
+            run(str(pdf_file))
+    else:
+        run(sys.argv[1])
