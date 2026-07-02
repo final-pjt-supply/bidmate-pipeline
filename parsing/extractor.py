@@ -99,7 +99,7 @@ _MAX_TEXT_CHARS = None  # 전문 전달 (llama-3.1-8b 128k 컨텍스트 내 처�
 
 _PAGE_SEP = re.compile(r'={10,}\n\d+페이지\n={10,}')
 _APPENDIX_START = re.compile(
-    r'^\s*(\[붙임|\[별첨|\[부록|\[서식|붙임\s*\d|별첨\s*\d|부록\s*\d|서식\s*\d)',
+    r'^\s*(\[붙임|\[별첨|\[부록|\[서식|붙임\s*\d|별첨\s*\d|부록\s*\d|서식\s*\d|【붙임|【별첨|【서식)',
     re.MULTILINE,
 )
 
