@@ -24,7 +24,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --quiet requests
+        run: pip install --quiet requests google-auth
 
       - name: Get PR diff
         run: |
@@ -34,11 +34,11 @@ jobs:
 
       - name: Gemini review
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GCP_PROJECT_ID: "smooth-research-501206-d6"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          # 무료 등급에서 쓸 수 있는 모델. 필요하면 gemini-2.5-flash-lite 등으로 교체 가능.
-          GEMINI_MODEL: "gemini-2.5-flash"
+          GEMINI_MODEL: "gemini-2.0-flash"
         run: python .github/scripts/gemini_review.py

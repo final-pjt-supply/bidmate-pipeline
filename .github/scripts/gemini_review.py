@@ -1,20 +1,32 @@
-"""PR diff를 Gemini로 리뷰하고 PR에 요약 코멘트를 답니다.
+"""PR diff를 Vertex AI Gemini로 리뷰하고 PR에 요약 코멘트를 답니다.
 GitHub Actions(gemini-pr-review.yml)에서 호출됩니다.
 """
 import os
 import json
 import sys
 import requests
+import google.auth
+import google.auth.transport.requests
+from google.oauth2 import service_account
 
-API_KEY = os.environ["GEMINI_API_KEY"]
 GH_TOKEN = os.environ["GH_TOKEN"]
 PR = os.environ["PR_NUMBER"]
 REPO = os.environ["REPO"]
 TITLE = os.environ.get("PR_TITLE", "")
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 MARKER = "<!-- gemini-pr-review -->"
 
-# 1) diff 읽기 (너무 크면 잘라서 무료 토큰 한도 보호)
+# 1) 서비스 계정 인증
+creds_json = os.environ["GOOGLE_CREDENTIALS"]
+creds_info = json.loads(creds_json)
+credentials = service_account.Credentials.from_service_account_info(
+    creds_info,
+    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+)
+credentials.refresh(google.auth.transport.requests.Request())
+
+# 2) diff 읽기
 with open("diff.txt", encoding="utf-8", errors="ignore") as f:
     diff = f.read()
 
@@ -27,7 +39,7 @@ if not diff.strip():
     print("변경 내용이 없어 리뷰를 건너뜁니다.")
     sys.exit(0)
 
-# 2) Gemini에 보낼 프롬프트 (한국어, 파이썬 프로젝트 기준)
+# 3) 프롬프트
 prompt = f"""당신은 숙련된 파이썬 코드 리뷰어입니다. 아래 GitHub Pull Request의 변경사항(diff)을 보고 한국어로 리뷰를 작성하세요.
 
 PR 제목: {TITLE}
@@ -56,16 +68,23 @@ PR 제목: {TITLE}
 if truncated:
     prompt += "\n\n(참고: diff가 너무 커서 일부만 전달되었습니다.)"
 
-# 3) Gemini API 호출
-url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
+# 4) Vertex AI Gemini API 호출
+url = (
+    f"https://us-central1-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}"
+    f"/locations/us-central1/publishers/google/models/{MODEL}:generateContent"
+)
 resp = requests.post(
     url,
-    json={"contents": [{"parts": [{"text": prompt}]}]},
+    headers={
+        "Authorization": f"Bearer {credentials.token}",
+        "Content-Type": "application/json",
+    },
+    json={"contents": [{"role": "user", "parts": [{"text": prompt}]}]},
     timeout=120,
 )
 
 if resp.status_code != 200:
-    print("Gemini API 오류:", resp.status_code, resp.text[:500])
+    print("Vertex AI API 오류:", resp.status_code, resp.text[:500])
     sys.exit(1)
 
 data = resp.json()
@@ -80,7 +99,7 @@ body = (
     "---\n*자동 생성된 리뷰입니다. 참고용으로만 활용하세요.*"
 )
 
-# 4) 기존 봇 코멘트가 있으면 갱신, 없으면 새로 작성 (PR을 깔끔하게 유지)
+# 5) 기존 봇 코멘트 갱신 또는 새로 작성
 headers = {
     "Authorization": f"Bearer {GH_TOKEN}",
     "Accept": "application/vnd.github+json",
