@@ -1,6 +1,5 @@
 name: Gemini PR Review
 
-# PR이 열리거나 새 커밋이 푸시될 때 자동으로 Gemini가 리뷰 코멘트를 답니다.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -24,7 +23,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --quiet requests
+        run: pip install --quiet requests google-genai google-auth
+
+      - name: Set up Google credentials
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > /tmp/gcp_key.json
 
       - name: Get PR diff
         run: |
@@ -34,7 +36,8 @@ jobs:
 
       - name: Gemini review
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_key.json
+          GCP_PROJECT_ID: "pr-review-bot-501208"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
