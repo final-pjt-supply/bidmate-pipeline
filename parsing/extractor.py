@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -96,6 +97,27 @@ JSON:"""
 
 _MAX_TEXT_CHARS = None  # 전문 전달 (llama-3.1-8b 128k 컨텍스트 내 처리 가능)
 
+_PAGE_SEP = re.compile(r'={10,}\n\d+페이지\n={10,}')
+_APPENDIX_START = re.compile(
+    r'^\s*(\[붙임|\[별첨|\[부록|\[서식|붙임\s*\d|별첨\s*\d|부록\s*\d|서식\s*\d)',
+    re.MULTILINE,
+)
+
+
+def _remove_appendices(text: str) -> str:
+    pages = _PAGE_SEP.split(text)
+    seps = _PAGE_SEP.findall(text)
+    result = [pages[0]]
+    for sep, page in zip(seps, pages[1:]):
+        if _APPENDIX_START.match(page.lstrip('\n')):
+            break
+        result.append(sep)
+        result.append(page)
+    removed = len(pages) - len(result)
+    if removed > 0:
+        print(f"[전처리] 붙임/서식 {removed}페이지 제거 ({len(text):,}자 → {len(''.join(result)):,}자)")
+    return ''.join(result)
+
 
 def _load_config() -> dict:
     env_path = Path(__file__).parent.parent / ".env"
@@ -140,6 +162,7 @@ def extract_qualifications(text: str) -> dict:
     if not config.get("LLM_API_KEY"):
         raise ValueError("LLM_API_KEY가 설정되지 않았습니다.")
 
+    text = _remove_appendices(text)
     trimmed = text[:_MAX_TEXT_CHARS] if _MAX_TEXT_CHARS else text
     prompt = _PROMPT.format(
         few_shot=_FEW_SHOT,
@@ -150,7 +173,7 @@ def extract_qualifications(text: str) -> dict:
     payload = {
         "model": config["LLM_MODEL"],
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
