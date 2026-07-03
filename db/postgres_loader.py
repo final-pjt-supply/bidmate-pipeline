@@ -40,18 +40,18 @@ def _connect():
     )
 
 
-def upsert_announcement(bid_ntce_no: str, bid_ntce_nm: str = "") -> None:
+def upsert_announcement(bid_ntce_no: str, bid_ntce_nm: str = "", ntce_instt_nm: str = "") -> None:
     """bid_qualifications의 FK 제약을 만족시키기 위해 최소 정보로 공고 원본을 upsert."""
     conn = _connect()
     try:
         with conn, conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO bid_announcements (bid_ntce_no, bid_ntce_nm)
-                VALUES (%s, %s)
+                INSERT INTO bid_announcements (bid_ntce_no, bid_ntce_nm, ntce_instt_nm)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (bid_ntce_no) DO NOTHING
                 """,
-                (bid_ntce_no, bid_ntce_nm),
+                (bid_ntce_no, bid_ntce_nm, ntce_instt_nm),
             )
     finally:
         conn.close()
@@ -85,10 +85,15 @@ def insert_qualifications(bid_ntce_no: str, qualifications: dict) -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from data.sample.sample_metadata import SAMPLE_METADATA
+
     json_dir = Path(__file__).parent.parent / "data" / "sample" / "output" / "json"
     for json_file in sorted(json_dir.glob("*.json")):
-        bid_ntce_no = f"SAMPLE-{json_file.stem}"
+        meta = SAMPLE_METADATA[json_file.stem]
         qualifications = json.loads(json_file.read_text(encoding="utf-8"))
-        upsert_announcement(bid_ntce_no, json_file.stem)
-        insert_qualifications(bid_ntce_no, qualifications)
-        print(f"[적재] {json_file.name} -> bid_ntce_no={bid_ntce_no}")
+        upsert_announcement(meta["bid_ntce_no"], meta["bid_ntce_nm"], meta["ntce_instt_nm"])
+        insert_qualifications(meta["bid_ntce_no"], qualifications)
+        print(f"[적재] {json_file.name} -> bid_ntce_no={meta['bid_ntce_no']}")

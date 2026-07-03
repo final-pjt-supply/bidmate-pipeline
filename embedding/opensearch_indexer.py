@@ -90,18 +90,34 @@ def index_chunks(bid_ntce_no: str, embedded_chunks: list[dict]) -> None:
     bulk(client, actions)
 
 
+def search_chunks(query_vector: list[float], k: int = 5, bid_ntce_no: str | None = None) -> list[dict]:
+    """벡터로 청크를 검색. bid_ntce_no를 주면 해당 공고 청크로만 범위를 좁힘(단일 공고 RAG),
+    주지 않으면 전체 공고 대상으로 검색(유사 공고 조회)."""
+    client = _get_client()
+    knn_query: dict = {"vector": query_vector, "k": k}
+    if bid_ntce_no:
+        knn_query["filter"] = {"term": {"bid_ntce_no": bid_ntce_no}}
+
+    res = client.search(index=INDEX_NAME, body={"size": k, "query": {"knn": {"vector": knn_query}}})
+    return [
+        {"score": hit["_score"], **hit["_source"]}
+        for hit in res["hits"]["hits"]
+    ]
+
+
 if __name__ == "__main__":
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
+    from data.sample.sample_metadata import SAMPLE_METADATA
     from embedding.embedder import embed
     from parsing.chunker import chunk
 
     txt_dir = Path(__file__).parent.parent / "data" / "sample" / "output" / "txt"
     for txt_file in sorted(txt_dir.glob("*.txt")):
+        meta = SAMPLE_METADATA[txt_file.stem]
         text = txt_file.read_text(encoding="utf-8")
         chunks = chunk(text, source=txt_file.name)
         embedded = embed(chunks)
-        bid_ntce_no = f"SAMPLE-{txt_file.stem}"
-        index_chunks(bid_ntce_no, embedded)
-        print(f"[색인] {txt_file.name} -> {len(embedded)}개 청크, bid_ntce_no={bid_ntce_no}")
+        index_chunks(meta["bid_ntce_no"], embedded)
+        print(f"[색인] {txt_file.name} -> {len(embedded)}개 청크, bid_ntce_no={meta['bid_ntce_no']}")
