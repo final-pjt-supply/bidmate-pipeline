@@ -1,0 +1,18 @@
+#!/bin/sh
+# 문서화 강제: parsing/ 또는 pipeline/ 코드가 스테이징됐는데 project.md가
+# 함께 갱신되지 않으면 커밋을 차단한다. (의도적 우회: git commit --no-verify)
+#
+# 활성화(각 clone에서 1회):  git config core.hooksPath .githooks
+
+staged=$(git diff --cached --name-only)
+code_changed=$(printf '%s\n' "$staged" | grep -E '^(parsing|pipeline)/' || true)
+doc_changed=$(printf '%s\n' "$staged" | grep -E '^project\.md$' || true)
+
+if [ -n "$code_changed" ] && [ -z "$doc_changed" ]; then
+    echo "✋ 커밋 차단: parsing/ 또는 pipeline/ 코드가 바뀌었는데 project.md가 갱신되지 않았습니다."
+    echo "   변경된 코드:"
+    printf '%s\n' "$code_changed" | sed 's/^/     - /'
+    echo "   → project.md를 갱신해 함께 스테이징하세요."
+    echo "     (의도적으로 건너뛰려면: git commit --no-verify)"
+    exit 1
+fi
