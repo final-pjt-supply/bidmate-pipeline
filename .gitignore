@@ -1,3 +1,29 @@
+# ── Python ──────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── 실험·비교 코드 (experiment / comparison) ──
+# 기능 코드가 아니라 방식 비교·튜닝용 스크립트는 공유하지 않는다.
+transforming/compare/
+transforming/testing.py
+transforming/trans_test_optimizing.py
+transforming/trans_test_optimizing_parallel.py
+
+# ── 생성·중간 데이터 (generated / intermediate) ──
+transforming/output/
+
+# ── 원본/변환 샘플 문서 (sample & converted docs) ──
+# 입력 원본과 변환 결과물은 데이터라 추적하지 않는다.
+*.hwp
+*.hwpx
+*.pdf
+/*.txt
+!requirement.txt
+
+# 환경변수 파일
+.env
 # Python
 __pycache__/
 *.py[cod]
