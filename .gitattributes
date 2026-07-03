@@ -1,0 +1,2 @@
+# 셸 훅은 LF 유지 (CRLF로 체크아웃되면 shebang이 깨져 훅이 동작하지 않음)
+.githooks/pre-commit text eol=lf
