@@ -43,8 +43,10 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Claude Code
+# Claude Code / 개인 문서 (로컬 전용 — 공유 안 함)
 CLAUDE.md
+project.md
+docs/
 
 # Sample data
 data/sample/*.pdf
