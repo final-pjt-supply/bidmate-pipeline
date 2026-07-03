@@ -1,0 +1,13 @@
+# LOCAL DEV ONLY — 운영/배포 설정에 절대 반영하지 말 것.
+#
+# OpenSearch 데모 TLS 인증서가 현재 로컬 개발 환경(Windows)에서 TLS 핸드셰이크에
+# 실패해(SSL: WRONG_VERSION_NUMBER) 보안 플러그인을 껐다. 컨테이너는 localhost에만
+# 바인딩되고 외부 네트워크에 노출하지 않는 것을 전제로 한다. 실제 민감 데이터는
+# 적재하지 말 것 (샘플/테스트 데이터 전용).
+#
+# 실행: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+services:
+  opensearch:
+    environment:
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"

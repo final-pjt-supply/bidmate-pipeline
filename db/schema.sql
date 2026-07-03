@@ -1,4 +1,19 @@
 -- ============================================================
+-- 입찰공고 원본 (나라장터 API 수집)
+-- ============================================================
+CREATE TABLE bid_announcements (
+    bid_ntce_no             VARCHAR(40)     PRIMARY KEY,    -- 입찰공고번호
+    bid_ntce_nm             VARCHAR(500),                   -- 공고명
+    ntce_instt_nm           VARCHAR(200),                   -- 공고기관명
+    bid_close_dt            TIMESTAMP,                      -- 입찰마감일시
+    presmpt_prce            BIGINT,                         -- 추정가격
+    indstryty_lmt_yn        VARCHAR(1),                     -- 업종제한여부
+    pq_eval_yn              VARCHAR(1),                     -- 적격심사대상여부
+    raw_json                JSONB,                          -- API 원본 응답 보관
+    created_at              TIMESTAMP       DEFAULT NOW()
+);
+
+-- ============================================================
 -- 입찰 자격요건 테이블 (PDF LLM 추출)
 -- ============================================================
 CREATE TABLE bid_qualifications (
