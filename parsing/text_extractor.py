@@ -55,6 +55,27 @@ def _extract_cell_content(
     return "\n".join(e[1] for e in elements)
 
 
+def _recover_cell_text(
+    page: fitz.Page,
+    x_coords: list,
+    y_coords: list,
+    row_idx: int,
+    col_idx: int,
+) -> str | None:
+    """table.extract()가 셀 값을 놓친 경우, 셀 좌표 구간에 실제 단어가 있을 때만 word-clip으로 복구."""
+    if row_idx >= len(y_coords) - 1 or col_idx >= len(x_coords) - 1:
+        return None
+    clip = fitz.Rect(
+        x_coords[col_idx], y_coords[row_idx],
+        x_coords[col_idx + 1], y_coords[row_idx + 1],
+    )
+    words = page.get_text("words", clip=clip)
+    if not words:
+        return None
+    words.sort(key=lambda w: (w[1], w[0]))
+    return " ".join(w[4] for w in words).strip()
+
+
 def _find_cell_for_image(img_rect: fitz.Rect, cells_flat: list) -> int | None:
     cx = (img_rect.x0 + img_rect.x1) / 2
     cy = (img_rect.y0 + img_rect.y1) / 2
@@ -122,6 +143,14 @@ def _format_table(
                 content = _extract_cell_content(page, cell_rect, cell_imgs, counter, registry, page_num)
             else:
                 content = str(cell_text or "").strip()
+                if not content:
+                    recovered = _recover_cell_text(page, x_coords, y_coords, row_idx, col_idx)
+                    if recovered:
+                        print(
+                            f"[표 복구] page={page_num} row={row_idx} col={col_idx} "
+                            f"text={recovered!r} source=word_clip_fallback"
+                        )
+                        content = recovered
 
             row_cells.append(content)
         lines.append(" | ".join(row_cells))
