@@ -11,9 +11,8 @@ import zipfile
 
 from lxml import etree
 
-from parsing.contract import (
-    ExtractResult, TABLE_OPEN, TABLE_CLOSE, image_placeholder,
-)
+from parsing.contract import ExtractResult
+from parsing.common import register_image, format_table, normalize_text
 
 HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 HC = "{http://www.hancom.co.kr/hwpml/2011/core}"
@@ -23,13 +22,9 @@ def _local(el) -> str:
     return etree.QName(el).localname
 
 
-def _register_image(pic, ctx) -> str:
-    ctx["n"] += 1
-    img_id = f"img_{ctx['n']:03d}"
+def _image_ref(pic):
     img = pic.find(f".//{HC}img")
-    ref = img.get("binaryItemIDRef") if img is not None else None
-    ctx["images"][img_id] = {"source_type": "hwpx", "ref": ref}
-    return image_placeholder(img_id)
+    return img.get("binaryItemIDRef") if img is not None else None
 
 
 def _render_table(tbl, ctx) -> str:
@@ -40,8 +35,8 @@ def _render_table(tbl, ctx) -> str:
             sub = tc.find(f"{HP}subList")
             cell = _render_container(sub, ctx) if sub is not None else ""
             cells.append(cell.strip())
-        rows.append(" | ".join(cells))
-    return f"{TABLE_OPEN}\n" + "\n".join(rows) + f"\n{TABLE_CLOSE}"
+        rows.append(cells)
+    return format_table(rows)
 
 
 def _render_paragraph(p, ctx) -> str:
@@ -55,7 +50,7 @@ def _render_paragraph(p, ctx) -> str:
             elif ln == "tbl":
                 out.append("\n" + _render_table(child, ctx) + "\n")
             elif ln == "pic":
-                out.append(_register_image(child, ctx))
+                out.append(register_image(ctx, "hwpx", _image_ref(child)))
             else:
                 walk(child)
 
@@ -74,7 +69,7 @@ def extract_hwpx(data: bytes) -> ExtractResult:
     )
     ctx = {"n": 0, "images": {}}
     parts = [_render_container(etree.fromstring(z.read(n)), ctx) for n in names]
-    text = re.sub(r"\n{3,}", "\n\n", "\n".join(parts))
+    text = normalize_text("\n".join(parts))
     return {"source_type": "hwpx", "text": text, "images": ctx["images"]}
 
 
