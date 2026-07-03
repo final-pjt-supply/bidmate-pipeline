@@ -41,7 +41,8 @@ s3://bid-testing/txts/doc_1.txt, doc_2.txt, …
 ```
 parsing/
   contract.py         # ExtractResult 계약 + 마커 상수([표], image_placeholder)
-  hwp_extractor.py    # HWP: hwp5proc xml → 파싱
+  common.py           # 공통 포맷 로직: register_image / format_table / normalize_text
+  hwp_extractor.py    # HWP: hwp5proc xml → 파싱 (HWP5PROC_PATH로 실행경로 지정 가능)
   hwpx_extractor.py   # HWPX: zip+xml 직접 파싱
   __init__.py         # extract(path) / extract_bytes(data, filename) / to_txt() 라우터
 pipeline/
@@ -65,11 +66,12 @@ transforming/         # 실험·비교 코드(gitignore 대상, 참고용)
 pip install -r requirement.txt          # lxml, boto3, python-dotenv, pyhwp 등
 # .env 필요: AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY,
 #            BUCKET_SRC_ADDRESS(s3://.../raw/), BUCKET_LOC_ADDRESS(s3://.../txts/)
+#   선택: HWP5PROC_PATH (hwp5proc가 PATH에 없을 때 실행 파일 경로)
 
 python -m pipeline.s3_runner --dry-run  # 추출만(업로드 X)로 검증
 python -m pipeline.s3_runner            # 실제 업로드
 ```
-- HWP 처리는 `hwp5proc`(pyhwp)가 PATH에 있어야 함.
+- HWP 처리는 `hwp5proc`(pyhwp)가 PATH에 있어야 함(또는 `HWP5PROC_PATH`로 지정).
 - `.env`는 gitignore됨(자격증명 커밋 금지).
 
 ## 주요 결정 (근거는 ADR)
@@ -90,3 +92,6 @@ python -m pipeline.s3_runner            # 실제 업로드
 
 - 커밋: 수동, `Type : 설명` (한국어). [CLAUDE.md](CLAUDE.md) / [Github_Convention.md](Github_Convention.md).
 - gitignore: 실험 코드·데이터·`.env`는 추적 안 함. 기능 코드만 push.
+- **문서화 강제 훅**: `parsing/`·`pipeline/` 코드 변경 시 이 파일(project.md) 갱신을
+  강제한다. clone 후 1회 활성화: `git config core.hooksPath .githooks`
+  (우회: `git commit --no-verify`).

@@ -37,6 +37,11 @@ txt를 다시 S3(`s3://bid-testing/txts/`)에 저장해야 한다.
 {"source_type": "hwp"|"hwpx", "text": str, "images": {img_id: {"source_type", "ref"}}}
 ```
 `parsing/__init__.py`의 `extract(path)` / `extract_bytes(data, filename)`가 확장자로 라우팅.
+형식별로 다른 건 트리 순회뿐이고, 표 마커 래핑·이미지 id·텍스트 정규화 같은 공통
+포맷 로직은 `parsing/common.py`(`register_image`/`format_table`/`normalize_text`)로 모은다.
+
+**5. `hwp5proc` 실행 파일 경로는 설정 가능하게.**
+기본은 PATH의 `hwp5proc`, `HWP5PROC_PATH` 환경변수로 재정의 가능.
 
 **4. S3 오케스트레이션.**
 - `.env`에서 `AWS_REGION`(ap-northeast-2), `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`,
@@ -64,7 +69,7 @@ txt를 다시 S3(`s3://bid-testing/txts/`)에 저장해야 한다.
 **트레이드오프 / 알려진 한계**
 - HWP의 박스/콜아웃이 내부적으로 1칸 표라 `[표]`로 표기됨(#6 PDF의 `[박스]`와 다름).
 - 병합 많은 표는 빈 파이프(`|  |`)가 생김.
-- HWP는 `hwp5proc` 실행 파일 의존(PATH 필요).
+- HWP는 `hwp5proc` 실행 파일 의존(PATH 또는 `HWP5PROC_PATH` 환경변수로 지정).
 
 **유예된 것 (Deferred)**
 - 이미지 캡션(describer) — PDF 팀과 **동일 이미지 분석 모델 공유** 예정. 지금은 위치만.

@@ -51,6 +51,20 @@ Docs : README.md 내용 추가
 새 파일을 커밋하기 전에 실험/데이터에 해당하는지 먼저 판단하고, 그렇다면
 `.gitignore`에 추가한다.
 
+## 문서화 규칙
+
+**작업할 때마다(커밋 체크포인트마다) 아래 두 문서를 최신으로 유지한다.**
+
+- **결정을 내리면 → ADR 작성**: 아키텍처·방식·트레이드오프 결정은
+  `docs/adr/NNNN-제목.md`에 **새 파일**로 기록한다(번호 순차). 기존 ADR은
+  고치지 않고, 뒤집힐 땐 새 ADR로 대체(상태: 대체됨). 형식은
+  [docs/adr/template.md](docs/adr/template.md) 참고.
+- **코드·구조가 바뀌면 → [project.md](project.md) 갱신**: 현재 상태·파일 맵·
+  실행법·로드맵을 living 문서로 최신화한다.
+
+원칙: **ADR = "왜 그렇게 정했나"(불변 기록)**, **project.md = "지금 어떻게 돼
+있나"(살아있는 상태)**. 사소한 변경은 project.md만, 방향을 정하는 결정은 ADR까지.
+
 ## 개발 환경
 
 - Python 3.14, 의존성은 [requirement.txt](requirement.txt).
