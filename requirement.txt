@@ -1,1 +1,5 @@
 pywin32
+lxml
+boto3
+python-dotenv
+pyhwp
