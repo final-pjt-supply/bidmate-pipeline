@@ -147,5 +147,43 @@ async def fetch_page(client, sem, counter, operation, bgn_dt, end_dt, ntce_instt
     return [], 0
 
 
+def day_query_bounds(day):
+    return f"{day:%Y%m%d}0000", f"{day:%Y%m%d}2359"
+
+
+async def fetch_first_pages(client, sem, counter, bgn_dt, end_dt):
+    """기관×업무구분 조합(최대 40개)의 1페이지를 동시 조회해 totalCount를 확보한다."""
+    combos = [(op_key, operation, inst) for op_key, operation in OPERATIONS.items() for inst in TOP10_INSTITUTIONS]
+    tasks = [
+        fetch_page(client, sem, counter, operation, bgn_dt, end_dt, inst, 1) for _, operation, inst in combos
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return {(op_key, inst): result for (op_key, _, inst), result in zip(combos, results)}
+
+
+async def fetch_remaining_pages(client, sem, counter, bgn_dt, end_dt, first_pages):
+    """1단계에서 확보한 totalCount로 남은 페이지 번호를 계산해 동시 조회한다."""
+    remaining_tasks = []
+    remaining_keys = []
+    for (op_key, inst), result in first_pages.items():
+        if isinstance(result, Exception):
+            continue
+        _, total = result
+        last_page = (total + NUM_OF_ROWS - 1) // NUM_OF_ROWS
+        operation = OPERATIONS[op_key]
+        for page_no in range(2, last_page + 1):
+            remaining_tasks.append(fetch_page(client, sem, counter, operation, bgn_dt, end_dt, inst, page_no))
+            remaining_keys.append((op_key, inst))
+
+    if not remaining_tasks:
+        return {}
+
+    results = await asyncio.gather(*remaining_tasks, return_exceptions=True)
+    grouped = {}
+    for key, result in zip(remaining_keys, results):
+        grouped.setdefault(key, []).append(result)
+    return grouped
+
+
 if __name__ == "__main__":
     raise SystemExit("Task 8에서 CLI 진입점이 추가될 예정입니다.")

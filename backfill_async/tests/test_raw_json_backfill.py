@@ -134,5 +134,74 @@ class TestFetchPageRetry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls, rjb.MAX_RETRY)
 
 
+class RoutingFakeClient:
+    """operation/기관/페이지 조합별로 미리 정해둔 응답을 돌려주는 가짜 client."""
+
+    def __init__(self, responses):
+        # responses: {(operation, ntce_instt_nm, page_no): payload_dict}
+        self.responses = responses
+        self.calls = []
+
+    async def get(self, url, params=None, timeout=None):
+        operation = url.rsplit("/", 1)[-1]
+        key = (operation, params["ntceInsttNm"], params["pageNo"])
+        self.calls.append(key)
+        return FakeResponse(self.responses[key])
+
+
+class TestTwoStageFetch(unittest.IsolatedAsyncioTestCase):
+    async def test_first_pages_covers_every_combo(self):
+        responses = {}
+        for op_key, operation in rjb.OPERATIONS.items():
+            for inst in rjb.TOP10_INSTITUTIONS:
+                responses[(operation, inst, 1)] = make_page_payload([{"bidNtceNo": f"{op_key}-{inst}"}], 1)
+
+        client = RoutingFakeClient(responses)
+        sem = asyncio.Semaphore(8)
+        counter = rjb.CallCounter()
+
+        first_pages = await rjb.fetch_first_pages(client, sem, counter, "202606010000", "202606012359")
+
+        expected_keys = {
+            (op_key, inst) for op_key in rjb.OPERATIONS for inst in rjb.TOP10_INSTITUTIONS
+        }
+        self.assertEqual(set(first_pages.keys()), expected_keys)
+        records, total = first_pages[("thng", rjb.TOP10_INSTITUTIONS[0])]
+        self.assertEqual(total, 1)
+
+    async def test_remaining_pages_computed_from_total_count(self):
+        op_key = "thng"
+        operation = rjb.OPERATIONS[op_key]
+        inst = rjb.TOP10_INSTITUTIONS[0]
+        total = rjb.NUM_OF_ROWS * 2 + 5  # 3페이지 필요
+
+        responses = {
+            (operation, inst, 2): make_page_payload([{"bidNtceNo": "p2"}], total),
+            (operation, inst, 3): make_page_payload([{"bidNtceNo": "p3"}], total),
+        }
+        client = RoutingFakeClient(responses)
+        sem = asyncio.Semaphore(8)
+        counter = rjb.CallCounter()
+
+        first_pages = {(op_key, inst): ([{"bidNtceNo": "p1"}], total)}
+        remaining = await rjb.fetch_remaining_pages(client, sem, counter, "202606010000", "202606012359", first_pages)
+
+        self.assertEqual(len(remaining[(op_key, inst)]), 2)
+        page2_records, _ = remaining[(op_key, inst)][0]
+        page3_records, _ = remaining[(op_key, inst)][1]
+        self.assertEqual(page2_records, [{"bidNtceNo": "p2"}])
+        self.assertEqual(page3_records, [{"bidNtceNo": "p3"}])
+
+    async def test_remaining_pages_empty_when_single_page(self):
+        first_pages = {("thng", rjb.TOP10_INSTITUTIONS[0]): ([{"bidNtceNo": "p1"}], 1)}
+        client = RoutingFakeClient({})
+        sem = asyncio.Semaphore(8)
+        counter = rjb.CallCounter()
+
+        remaining = await rjb.fetch_remaining_pages(client, sem, counter, "202606010000", "202606012359", first_pages)
+
+        self.assertEqual(remaining, {})
+
+
 if __name__ == "__main__":
     unittest.main()
