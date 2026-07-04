@@ -95,7 +95,7 @@ s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/
 | | daily | backfill |
 |---|---|---|
 | raw/curated 저장 단위 | 공고 1건 = JSON 1개 (`{bidNtceNo}-{ord}.json`) | 하루+업무구분 = 배열 JSON 1개 (`biz_div={cat}.json`) |
-| 다운로드 폴더 | `bidNtceNo={공고번호}_ord={2자리}` 공고 단위 폴더 | 동일 |
+| 다운로드 폴더 | `bidNtceNo={공고번호}_ord={차수}` 공고 단위 폴더 | 동일 |
 | 파일명 규칙 | `{원본stem}_{공고첨부\|표준공고서}{확장자}`, 중복 시 `_2`, `_3` 접미사 | 동일 |
 
 다운로드 단계는 curated를 읽을 때 단건 dict와 배열을 모두 지원하므로
