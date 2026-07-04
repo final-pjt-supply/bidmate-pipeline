@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from datetime import datetime
 
@@ -260,6 +261,96 @@ class TestProcessDay(unittest.IsolatedAsyncioTestCase):
         op_key, inst, page_no, exc = failures[0]
         self.assertEqual((op_key, inst, page_no), ("thng", bad_inst, 1))
         self.assertIsInstance(exc, RuntimeError)
+
+
+class FakeS3:
+    def __init__(self):
+        self.put_calls = []
+
+    async def put_object(self, Bucket, Key, Body, ContentType):
+        self.put_calls.append((Bucket, Key, json.loads(Body.decode("utf-8"))))
+
+
+def _all_success_client(day):
+    responses = {}
+    for op_key, op in rjb.OPERATIONS.items():
+        for inst in rjb.TOP10_INSTITUTIONS:
+            record = {
+                "bidNtceNo": f"{op_key}-{inst}-{day:%Y%m%d}",
+                "ntceInsttNm": inst,
+                "bidClseDt": "2099-01-01 00:00:00",
+                "bidNtceDt": f"{day:%Y-%m-%d} 09:00:00",
+            }
+            responses[(op, inst, 1)] = make_page_payload([record], 1)
+    return RoutingFakeClient(responses)
+
+
+class _AsyncClientCtx:
+    """httpx.AsyncClient(...)를 흉내내는 async context manager 래퍼."""
+
+    def __init__(self, fake_client):
+        self._fake_client = fake_client
+
+    async def __aenter__(self):
+        return self._fake_client
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class TestCollectRange(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._orig_sleep = asyncio.sleep
+        asyncio.sleep = lambda *_args, **_kwargs: self._orig_sleep(0)
+        self._orig_session = rjb.s3_session
+        self._orig_async_client = httpx.AsyncClient
+        self._orig_budget = rjb.CALL_BUDGET
+        self.fake_s3 = FakeS3()
+
+        class _FakeSession:
+            def __init__(self, s3):
+                self._s3 = s3
+
+            def client(self, name):
+                return self
+
+            async def __aenter__(self):
+                return self._s3
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+        rjb.s3_session = lambda: _FakeSession(self.fake_s3)
+
+    async def asyncTearDown(self):
+        asyncio.sleep = self._orig_sleep
+        rjb.s3_session = self._orig_session
+        httpx.AsyncClient = self._orig_async_client
+        rjb.CALL_BUDGET = self._orig_budget
+
+    async def test_processes_full_range_when_under_budget(self):
+        start = datetime(2026, 6, 1)
+        end = datetime(2026, 6, 2)
+
+        httpx.AsyncClient = lambda *a, **kw: _AsyncClientCtx(_all_success_client(start))
+
+        had_failure, stopped_early = await rjb.collect_range(start, end, "bidmate", 8)
+
+        self.assertFalse(had_failure)
+        self.assertFalse(stopped_early)
+        self.assertTrue(self.fake_s3.put_calls)
+
+    async def test_stops_early_past_call_budget(self):
+        start = datetime(2026, 6, 1)
+        end = datetime(2026, 6, 5)
+
+        httpx.AsyncClient = lambda *a, **kw: _AsyncClientCtx(_all_success_client(start))
+        rjb.CALL_BUDGET = 5  # 하루 처리(기관10*업무4=40콜)만으로도 즉시 초과하도록 낮춤
+
+        had_failure, stopped_early = await rjb.collect_range(start, end, "bidmate", 8)
+
+        self.assertFalse(had_failure)
+        self.assertTrue(stopped_early)
 
 
 if __name__ == "__main__":

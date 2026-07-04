@@ -219,5 +219,64 @@ async def process_day(client, sem, counter, day, now):
     return by_operation, failures
 
 
+def s3_session():
+    try:
+        import aioboto3
+    except ImportError as exc:
+        raise SystemExit("S3 저장을 위해 aioboto3 설치가 필요합니다. 예: pip install aioboto3") from exc
+    return aioboto3.Session()
+
+
+async def put_json(s3, bucket, key, payload):
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    await s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=body,
+        ContentType="application/json; charset=utf-8",
+    )
+
+
+async def collect_range(start_day, end_day, bucket, concurrency):
+    sem = asyncio.Semaphore(concurrency)
+    counter = CallCounter()
+    now = datetime.now()
+    had_failure = False
+
+    session = s3_session()
+    async with session.client("s3") as s3, httpx.AsyncClient() as client:
+        day = start_day
+        while day <= end_day:
+            by_operation, failures = await process_day(client, sem, counter, day, now)
+
+            for op_key, records in by_operation.items():
+                for notice_day, day_records in group_by_day(records, now).items():
+                    raw_key = s3_day_json_key(RAW_PREFIX, op_key, notice_day)
+                    curated_key = s3_day_json_key(CURATED_PREFIX, op_key, notice_day)
+                    curated_records = [to_curated(record, op_key, now) for record in day_records]
+                    await put_json(s3, bucket, raw_key, day_records)
+                    await put_json(s3, bucket, curated_key, curated_records)
+
+            if failures:
+                had_failure = True
+                for op_key, inst, page_no, exc in failures:
+                    log.error("[%s] %s/%s p%s 실패: %s", f"{day:%Y-%m-%d}", op_key, inst, page_no, exc)
+
+            log.info("[%s] 처리 완료 (누적 API 호출 %s회)", f"{day:%Y-%m-%d}", counter.count)
+
+            if counter.count >= CALL_BUDGET:
+                log.warning(
+                    "%s일까지 처리 완료. 호출 한도(%s회) 근접으로 조기 종료. 이후 범위는 --start %s 로 재실행하세요.",
+                    f"{day:%Y-%m-%d}",
+                    CALL_BUDGET,
+                    f"{day + timedelta(days=1):%Y-%m-%d}",
+                )
+                return had_failure, True
+
+            day += timedelta(days=1)
+
+    return had_failure, False
+
+
 if __name__ == "__main__":
     raise SystemExit("Task 8에서 CLI 진입점이 추가될 예정입니다.")
