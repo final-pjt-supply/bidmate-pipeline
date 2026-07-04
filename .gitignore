@@ -30,3 +30,30 @@ docs/
 # 로컬 작업용 문서(project.md, CLAUDE.md)와 docs/는 공유하지 않는다.
 CLAUDE.md
 project.md
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 환경변수 / 비밀키
+.env
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code / 개인 문서 (로컬 전용 — 공유 안 함)
+CLAUDE.md
+project.md
+docs/
+
+# Sample data
+data/sample/*.pdf
+data/sample/output/
