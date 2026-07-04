@@ -158,5 +158,40 @@ def file_s3_key(prefix, metadata, content_type, file_url, used_keys=None):
     return key
 
 
+async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int, used_keys: set):
+    file_url = str(metadata.get("fileUrl") or "").strip()
+    if not file_url:
+        return {
+            "downloadStatus": "skipped",
+            "downloadPath": "",
+            "downloadSize": 0,
+            "contentType": "",
+            "downloadError": "fileUrl이 비어 있습니다.",
+        }
+
+    response = await client.get(file_url, timeout=timeout)
+    response.raise_for_status()
+
+    content_type = response.headers.get("Content-Type", "")
+    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url, used_keys)
+    extra_args = {"ContentType": content_type} if content_type else None
+
+    body = io.BytesIO(response.content)
+    if extra_args:
+        await s3.upload_fileobj(body, bucket, key, ExtraArgs=extra_args)
+    else:
+        await s3.upload_fileobj(body, bucket, key)
+
+    return {
+        "downloadStatus": "success",
+        "downloadPath": f"s3://{bucket}/{key}",
+        "downloadSize": len(response.content),
+        "contentType": content_type,
+        "downloadError": "",
+        "s3Bucket": bucket,
+        "s3Key": key,
+    }
+
+
 if __name__ == "__main__":
     raise SystemExit("Task 12에서 CLI 진입점이 추가될 예정입니다.")

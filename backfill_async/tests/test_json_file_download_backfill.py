@@ -1,6 +1,8 @@
 import unittest
 from datetime import datetime
 
+import httpx
+
 from backfill_async import json_file_download_backfill as jfd
 
 
@@ -123,6 +125,81 @@ class TestIterCuratedRange(unittest.IsolatedAsyncioTestCase):
         ]
 
         self.assertEqual(results, [])
+
+
+class FakeHttpResponse:
+    def __init__(self, content, headers=None):
+        self.content = content
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        pass
+
+
+class FakeHttpClient:
+    def __init__(self, response_or_exc):
+        self._response_or_exc = response_or_exc
+        self.calls = []
+
+    async def get(self, url, timeout=None):
+        self.calls.append(url)
+        if isinstance(self._response_or_exc, Exception):
+            raise self._response_or_exc
+        return self._response_or_exc
+
+
+class FakeS3Upload:
+    def __init__(self):
+        self.uploads = []
+
+    async def upload_fileobj(self, fileobj, bucket, key, ExtraArgs=None):
+        self.uploads.append((bucket, key, fileobj.read(), ExtraArgs))
+
+
+class TestUploadAttachment(unittest.IsolatedAsyncioTestCase):
+    def base_metadata(self, **overrides):
+        metadata = {
+            "bidNtceNo": "20260700001",
+            "bidNtceOrd": "0",
+            "bidNtceDt": "2026-07-04 09:00:00",
+            "업무구분": "servc",
+            "fileKind": "공고첨부",
+            "fileName": "과업지시서.hwp",
+            "fileUrl": "http://example.com/a.hwp",
+        }
+        metadata.update(overrides)
+        return metadata
+
+    async def test_successful_download_uploads_to_s3(self):
+        client = FakeHttpClient(FakeHttpResponse(b"hello", {"Content-Type": "application/x-hwp"}))
+        s3 = FakeS3Upload()
+        used_keys = set()
+
+        result = await jfd.upload_attachment(s3, "bidmate", client, self.base_metadata(), 30, used_keys)
+
+        self.assertEqual(result["downloadStatus"], "success")
+        self.assertEqual(result["downloadSize"], 5)
+        self.assertEqual(len(s3.uploads), 1)
+        bucket, key, body, extra_args = s3.uploads[0]
+        self.assertEqual(bucket, "bidmate")
+        self.assertEqual(body, b"hello")
+        self.assertEqual(extra_args, {"ContentType": "application/x-hwp"})
+
+    async def test_missing_url_is_skipped(self):
+        client = FakeHttpClient(FakeHttpResponse(b""))
+        s3 = FakeS3Upload()
+
+        result = await jfd.upload_attachment(s3, "bidmate", client, self.base_metadata(fileUrl=""), 30, set())
+
+        self.assertEqual(result["downloadStatus"], "skipped")
+        self.assertEqual(len(s3.uploads), 0)
+
+    async def test_download_failure_raises(self):
+        client = FakeHttpClient(httpx.ConnectError("boom", request=None))
+        s3 = FakeS3Upload()
+
+        with self.assertRaises(httpx.ConnectError):
+            await jfd.upload_attachment(s3, "bidmate", client, self.base_metadata(), 30, set())
 
 
 if __name__ == "__main__":
