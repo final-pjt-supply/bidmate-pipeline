@@ -21,7 +21,13 @@ import requests
 
 from schema import parse_dt
 
-BUCKET_NAME = os.environ.get("S3_BUCKET", "bidmate")
+try:  # .env가 있으면 로드, 없으면(IAM 역할·export 등) 무시
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    pass
+
+BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 CURATED_PREFIX = "raw/curated/backfill"
 FILES_PREFIX = "raw/downloads/backfill"
 METADATA_PREFIX = f"{FILES_PREFIX}/_metadata"

@@ -24,8 +24,14 @@ import requests
 from institutions import TOP10_INSTITUTIONS
 from schema import parse_dt, to_curated
 
+try:  # .env가 있으면 로드, 없으면(IAM 역할·export 등) 무시
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    pass
+
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
-BUCKET_NAME = os.environ.get("S3_BUCKET", "bidmate")
+BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 RAW_PREFIX = "raw/raw/backfill"
 CURATED_PREFIX = "raw/curated/backfill"
