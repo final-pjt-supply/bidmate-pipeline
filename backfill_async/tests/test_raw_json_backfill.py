@@ -39,22 +39,6 @@ class TestGroupByDay(unittest.TestCase):
         self.assertEqual(set(groups.keys()), {datetime(2026, 6, 3)})
 
 
-class TestIsOpen(unittest.TestCase):
-    def test_open_when_close_date_in_future(self):
-        now = datetime(2026, 6, 1)
-        record = {"bidClseDt": "2026-06-10 18:00:00"}
-        self.assertTrue(rjb.is_open(record, now))
-
-    def test_closed_when_close_date_in_past(self):
-        now = datetime(2026, 6, 15)
-        record = {"bidClseDt": "2026-06-10 18:00:00"}
-        self.assertFalse(rjb.is_open(record, now))
-
-    def test_open_when_close_date_missing(self):
-        now = datetime(2026, 6, 1)
-        self.assertTrue(rjb.is_open({}, now))
-
-
 class TestIsExactInstitution(unittest.TestCase):
     def test_matches_exact_name(self):
         record = {"ntceInsttNm": "조달청"}
@@ -260,7 +244,6 @@ class TestProcessDay(unittest.IsolatedAsyncioTestCase):
         asyncio.sleep = self._orig_sleep
 
     async def test_partial_failure_keeps_successful_records(self):
-        now = datetime(2026, 6, 1, 12, 0, 0)
         good_inst = rjb.TOP10_INSTITUTIONS[0]
         bad_inst = rjb.TOP10_INSTITUTIONS[1]
         operation = rjb.OPERATIONS["thng"]
@@ -273,7 +256,6 @@ class TestProcessDay(unittest.IsolatedAsyncioTestCase):
                 record = {
                     "bidNtceNo": f"{op_key}-{inst}",
                     "ntceInsttNm": inst,
-                    "bidClseDt": "2026-12-31 18:00:00",
                     "bidNtceDt": "2026-06-01 09:00:00",
                 }
                 responses[(op, inst, 1)] = make_page_payload([record], 1)
@@ -283,7 +265,7 @@ class TestProcessDay(unittest.IsolatedAsyncioTestCase):
         sem = asyncio.Semaphore(8)
         counter = rjb.CallCounter()
 
-        by_operation, failures = await rjb.process_day(client, sem, counter, datetime(2026, 6, 1), now)
+        by_operation, failures = await rjb.process_day(client, sem, counter, datetime(2026, 6, 1))
 
         self.assertIn("thng", by_operation)
         self.assertTrue(any(r["ntceInsttNm"] == good_inst for r in by_operation["thng"]))

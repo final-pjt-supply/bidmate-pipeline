@@ -59,11 +59,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("g2b-backfill-async")
 
 
-def is_open(record, now):
-    close_dt = parse_dt(record.get("bidClseDt"))
-    return close_dt is None or close_dt > now
-
-
 def is_exact_institution(record, ntce_instt_nm):
     """ntceInsttNm 파라미터는 부분일치라 조회 대상 기관명과 완전일치하는 레코드만 남긴다."""
     return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
@@ -202,8 +197,12 @@ async def fetch_remaining_pages(client, sem, counter, bgn_dt, end_dt, first_page
     return grouped
 
 
-async def process_day(client, sem, counter, day, now):
-    """하루치 2단계 동시조회 결과를 필터링하고, 성공/실패를 분리한다."""
+async def process_day(client, sem, counter, day):
+    """하루치 2단계 동시조회 결과를 필터링하고, 성공/실패를 분리한다.
+
+    backfill은 과거 이력 수집이 목적이라 "지금 기준 아직 마감 안 된 공고"만 남기는
+    필터(daily 수집용 is_open)는 적용하지 않는다 — 이미 마감된 과거 공고도 그대로 보존한다.
+    """
     bgn_dt, end_dt = day_query_bounds(day)
 
     first_pages = await fetch_first_pages(client, sem, counter, bgn_dt, end_dt)
@@ -230,7 +229,7 @@ async def process_day(client, sem, counter, day, now):
 
     by_operation = {}
     for op_key, inst, record in raw_hits:
-        if is_exact_institution(record, inst) and is_open(record, now):
+        if is_exact_institution(record, inst):
             by_operation.setdefault(op_key, []).append(record)
 
     return by_operation, failures
@@ -264,7 +263,7 @@ async def collect_range(start_day, end_day, bucket, concurrency):
     async with session.client("s3") as s3, httpx.AsyncClient() as client:
         day = start_day
         while day <= end_day:
-            by_operation, failures = await process_day(client, sem, counter, day, now)
+            by_operation, failures = await process_day(client, sem, counter, day)
 
             for op_key, records in by_operation.items():
                 for notice_day, day_records in group_by_day(records, now).items():
