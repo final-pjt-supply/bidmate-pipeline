@@ -10,7 +10,10 @@ TABLE_OPEN = "[표]"
 TABLE_CLOSE = "[/표]"
 
 
-def image_placeholder(img_id: str) -> str:
+def image_placeholder(img_id: str, caption: str | None = None) -> str:
+    # 캡션이 있으면 본문에 인라인으로 붙여 임베딩 텍스트에 바로 포함시킨다.
+    if caption:
+        return f"[이미지:{img_id}: {caption}]"
     return f"[이미지:{img_id}]"
 
 

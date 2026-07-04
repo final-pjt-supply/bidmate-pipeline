@@ -12,6 +12,7 @@ import boto3
 from dotenv import find_dotenv, load_dotenv
 
 from parsing import extract_bytes, to_txt
+from parsing.hwp_image_describer import make_describer
 
 
 def _parse_uri(uri: str):
@@ -45,11 +46,18 @@ def run(dry_run: bool = False):
     src_bucket, keys = _list_source_keys(s3, src_uri)
     dst_bucket, dst_prefix = _parse_uri(dst_uri)
 
+    # 이미지 캡션: 키가 있으면 켜고, 없으면 경고 후 캡션 없이 진행(placeholder만).
+    try:
+        describe_fn = make_describer()
+    except Exception as e:
+        print(f"이미지 캡션 비활성화: {e}")
+        describe_fn = None
+
     results = []
     for i, key in enumerate(keys, 1):
         try:
             data = s3.get_object(Bucket=src_bucket, Key=key)["Body"].read()
-            result = extract_bytes(data, key)
+            result = extract_bytes(data, key, describe_fn=describe_fn)
             txt = to_txt(result)
         except Exception:
             # 다운로드 실패·읽을 수 없는 문서(암호/손상/미지원)는 건너뛰고 배치는 계속 진행

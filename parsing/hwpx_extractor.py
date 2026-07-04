@@ -62,17 +62,61 @@ def _render_container(container, ctx) -> str:
     return "\n".join(_render_paragraph(p, ctx) for p in container.findall(f"{HP}p"))
 
 
-def extract_hwpx(data: bytes) -> ExtractResult:
+def _make_bindata_resolver(z: zipfile.ZipFile):
+    """binaryItemIDRef -> 이미지 bytes 리졸버. 매니페스트(content.hpf)로 href를
+    찾고, 없으면 BinData/ 이름 매칭으로 폴백한다. 못 찾으면 None."""
+    # 1) 매니페스트 id -> href 매핑 (네임스페이스 무시하고 localname으로 매칭)
+    href_by_id: dict[str, str] = {}
+    try:
+        manifest = etree.fromstring(z.read("Contents/content.hpf"))
+        for el in manifest.iter():
+            if _local(el) == "item" and el.get("id") and el.get("href"):
+                href_by_id[el.get("id")] = el.get("href")
+    except Exception:
+        pass  # 매니페스트 없거나 파싱 실패 → 폴백만 사용
+
+    # 2) BinData 실제 경로 목록 (폴백용): stem -> full name
+    bindata = {
+        n.rsplit("/", 1)[-1].split(".")[0]: n
+        for n in z.namelist() if n.startswith("BinData/")
+    }
+
+    def resolve(ref):
+        if ref is None:
+            return None
+        # href는 보통 "BinData/xxx.png". zip 루트 기준 경로로 정규화.
+        href = href_by_id.get(ref)
+        candidates = []
+        if href:
+            candidates.append(href.lstrip("./"))
+            candidates.append(f"Contents/{href}".replace("Contents/BinData", "BinData"))
+        if ref in bindata:
+            candidates.append(bindata[ref])
+        for name in candidates:
+            try:
+                return z.read(name)
+            except KeyError:
+                continue
+        return None
+
+    return resolve
+
+
+def extract_hwpx(data: bytes, describe_fn=None) -> ExtractResult:
     z = zipfile.ZipFile(io.BytesIO(data))
     names = sorted(
         n for n in z.namelist() if re.match(r"Contents/section\d+\.xml$", n)
     )
-    ctx = {"n": 0, "images": {}}
+    ctx = {
+        "n": 0, "images": {},
+        "resolve": _make_bindata_resolver(z),
+        "describe_fn": describe_fn,
+    }
     parts = [_render_container(etree.fromstring(z.read(n)), ctx) for n in names]
     text = normalize_text("\n".join(parts))
     return {"source_type": "hwpx", "text": text, "images": ctx["images"]}
 
 
-def extract_hwpx_file(path: str) -> ExtractResult:
+def extract_hwpx_file(path: str, describe_fn=None) -> ExtractResult:
     with open(path, "rb") as f:
-        return extract_hwpx(f.read())
+        return extract_hwpx(f.read(), describe_fn=describe_fn)
