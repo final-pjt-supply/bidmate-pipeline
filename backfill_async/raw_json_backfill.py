@@ -185,5 +185,39 @@ async def fetch_remaining_pages(client, sem, counter, bgn_dt, end_dt, first_page
     return grouped
 
 
+async def process_day(client, sem, counter, day, now):
+    """하루치 2단계 동시조회 결과를 필터링하고, 성공/실패를 분리한다."""
+    bgn_dt, end_dt = day_query_bounds(day)
+
+    first_pages = await fetch_first_pages(client, sem, counter, bgn_dt, end_dt)
+    remaining = await fetch_remaining_pages(client, sem, counter, bgn_dt, end_dt, first_pages)
+
+    raw_hits = []  # (op_key, ntce_instt_nm, record)
+    failures = []  # (op_key, ntce_instt_nm, page_no, exception)
+
+    for (op_key, inst), result in first_pages.items():
+        if isinstance(result, Exception):
+            failures.append((op_key, inst, 1, result))
+            continue
+        records, _ = result
+        raw_hits.extend((op_key, inst, record) for record in records)
+
+    for (op_key, inst), page_results in remaining.items():
+        for offset, result in enumerate(page_results):
+            page_no = offset + 2
+            if isinstance(result, Exception):
+                failures.append((op_key, inst, page_no, result))
+                continue
+            records, _ = result
+            raw_hits.extend((op_key, inst, record) for record in records)
+
+    by_operation = {}
+    for op_key, inst, record in raw_hits:
+        if is_exact_institution(record, inst) and is_open(record, now):
+            by_operation.setdefault(op_key, []).append(record)
+
+    return by_operation, failures
+
+
 if __name__ == "__main__":
     raise SystemExit("Task 8에서 CLI 진입점이 추가될 예정입니다.")

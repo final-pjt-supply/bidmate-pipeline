@@ -203,5 +203,64 @@ class TestTwoStageFetch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(remaining, {})
 
 
+class SelectiveFailClient:
+    """특정 (operation, 기관, 페이지) 조합만 실패시키는 가짜 client."""
+
+    def __init__(self, responses, fail_keys):
+        self.responses = responses
+        self.fail_keys = fail_keys
+
+    async def get(self, url, params=None, timeout=None):
+        operation = url.rsplit("/", 1)[-1]
+        key = (operation, params["ntceInsttNm"], params["pageNo"])
+        if key in self.fail_keys:
+            raise httpx.ConnectError("boom", request=None)
+        return FakeResponse(self.responses[key])
+
+
+class TestProcessDay(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._orig_sleep = asyncio.sleep
+        asyncio.sleep = lambda *_args, **_kwargs: self._orig_sleep(0)
+
+    async def asyncTearDown(self):
+        asyncio.sleep = self._orig_sleep
+
+    async def test_partial_failure_keeps_successful_records(self):
+        now = datetime(2026, 6, 1, 12, 0, 0)
+        good_inst = rjb.TOP10_INSTITUTIONS[0]
+        bad_inst = rjb.TOP10_INSTITUTIONS[1]
+        operation = rjb.OPERATIONS["thng"]
+
+        responses = {}
+        for op_key, op in rjb.OPERATIONS.items():
+            for inst in rjb.TOP10_INSTITUTIONS:
+                if op == operation and inst == bad_inst:
+                    continue  # 이 조합은 fail_keys로 실패 처리
+                record = {
+                    "bidNtceNo": f"{op_key}-{inst}",
+                    "ntceInsttNm": inst,
+                    "bidClseDt": "2026-12-31 18:00:00",
+                    "bidNtceDt": "2026-06-01 09:00:00",
+                }
+                responses[(op, inst, 1)] = make_page_payload([record], 1)
+
+        fail_keys = {(operation, bad_inst, p) for p in range(1, rjb.MAX_RETRY + 1)}
+        client = SelectiveFailClient(responses, fail_keys)
+        sem = asyncio.Semaphore(8)
+        counter = rjb.CallCounter()
+
+        by_operation, failures = await rjb.process_day(client, sem, counter, datetime(2026, 6, 1), now)
+
+        self.assertIn("thng", by_operation)
+        self.assertTrue(any(r["ntceInsttNm"] == good_inst for r in by_operation["thng"]))
+        self.assertFalse(any(r["ntceInsttNm"] == bad_inst for r in by_operation["thng"]))
+
+        self.assertEqual(len(failures), 1)
+        op_key, inst, page_no, exc = failures[0]
+        self.assertEqual((op_key, inst, page_no), ("thng", bad_inst, 1))
+        self.assertIsInstance(exc, RuntimeError)
+
+
 if __name__ == "__main__":
     unittest.main()
