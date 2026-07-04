@@ -47,9 +47,14 @@ def run(dry_run: bool = False):
 
     results = []
     for i, key in enumerate(keys, 1):
-        data = s3.get_object(Bucket=src_bucket, Key=key)["Body"].read()
-        result = extract_bytes(data, key)
-        txt = to_txt(result)
+        try:
+            data = s3.get_object(Bucket=src_bucket, Key=key)["Body"].read()
+            result = extract_bytes(data, key)
+            txt = to_txt(result)
+        except Exception:
+            # 다운로드 실패·읽을 수 없는 문서(암호/손상/미지원)는 건너뛰고 배치는 계속 진행
+            print(f"unacceptable file: {key}")
+            continue
         out_key = f"{dst_prefix}doc_{i}.txt"
         if not dry_run:
             s3.put_object(
@@ -69,7 +74,13 @@ if __name__ == "__main__":
     import sys
 
     dry = "--dry-run" in sys.argv
-    for r in run(dry_run=dry):
+    try:
+        results = run(dry_run=dry)
+    except Exception as e:
+        # S3 접속·설정 문제는 한 줄로 떨구고 종료
+        print(f"S3 error: {e}")
+        sys.exit(1)
+    for r in results:
         arrow = "(dry-run, 업로드 안 함)" if dry else "->"
         print(f"[{r['source_type']}] {r['src_key']}  {arrow}  "
               f"{r['out_key']}  ({r['chars']}자, 이미지 {r['images']}개)")

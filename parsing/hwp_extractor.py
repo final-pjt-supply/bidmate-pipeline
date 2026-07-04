@@ -6,17 +6,16 @@ HWP는 바이너리(OLE)라 hwp5proc로 XML을 뽑은 뒤 lxml로 파싱한다. 
 이미지(ShapePicture)는 [이미지:img_XXX] placeholder만 남긴다(캡션 미구현).
 """
 import os
-import re
 import subprocess
 import tempfile
 
 from lxml import etree
 
-from parsing.contract import (
-    ExtractResult, TABLE_OPEN, TABLE_CLOSE, image_placeholder,
-)
+from parsing.contract import ExtractResult
+from parsing.common import register_image, format_table, normalize_text
 
-HWP5PROC = "hwp5proc"  # PATH에 설치돼 있어야 함(pyhwp)
+# 실행 파일 경로. 기본은 PATH의 hwp5proc, HWP5PROC_PATH 환경변수로 재정의 가능.
+HWP5PROC = os.getenv("HWP5PROC_PATH", "hwp5proc")
 
 
 def _generate_xml(hwp_path: str) -> bytes:
@@ -27,13 +26,9 @@ def _generate_xml(hwp_path: str) -> bytes:
     return proc.stdout
 
 
-def _register_image(shape, ctx) -> str:
-    ctx["n"] += 1
-    img_id = f"img_{ctx['n']:03d}"
+def _image_ref(shape):
     pi = shape.find(".//PictureInfo")
-    ref = pi.get("bindata-id") if pi is not None else None
-    ctx["images"][img_id] = {"source_type": "hwp", "ref": ref}
-    return image_placeholder(img_id)
+    return pi.get("bindata-id") if pi is not None else None
 
 
 def _render_table(tc, ctx) -> str:
@@ -45,8 +40,8 @@ def _render_table(tc, ctx) -> str:
                 _render_paragraph(p, ctx) for p in cell.findall("Paragraph")
             )
             cells.append(cell_text.strip())
-        rows.append(" | ".join(cells))
-    return f"{TABLE_OPEN}\n" + "\n".join(rows) + f"\n{TABLE_CLOSE}"
+        rows.append(cells)
+    return format_table(rows)
 
 
 def _render_paragraph(p, ctx) -> str:
@@ -61,7 +56,7 @@ def _render_paragraph(p, ctx) -> str:
             elif tag == "TableControl":
                 out.append("\n" + _render_table(child, ctx) + "\n")
             elif tag == "ShapePicture":
-                out.append(_register_image(child, ctx))
+                out.append(register_image(ctx, "hwp", _image_ref(child)))
             else:
                 walk(child)
 
@@ -81,7 +76,7 @@ def extract_hwp_file(path: str) -> ExtractResult:
         if any(a.tag == "TableCell" for a in p.iterancestors()):
             continue
         lines.append(_render_paragraph(p, ctx))
-    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))
+    text = normalize_text("\n".join(lines))
     return {"source_type": "hwp", "text": text, "images": ctx["images"]}
 
 
