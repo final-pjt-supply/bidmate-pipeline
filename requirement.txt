@@ -3,5 +3,6 @@ lxml
 boto3
 python-dotenv
 pyhwp
+pymupdf
 requests
 Pillow
