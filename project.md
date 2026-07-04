@@ -8,13 +8,15 @@
 입찰 공고 문서(HWP / HWPX / PDF)를 **텍스트로 추출 → 임베딩 → 에이전트**가 활용하는
 파이프라인. 원본은 S3에 있고, 추출한 txt를 다시 S3에 저장한다.
 
-## 현재 상태 (2026-07-03)
+## 현재 상태 (2026-07-04)
 
 **동작하는 것 (이 브랜치 `feat/hwp-to-pdf`):**
 - **HWP → txt**: `hwp5proc xml`(embedbin 없이) → `lxml` 파싱. `parsing/hwp_extractor.py`
 - **HWPX → txt**: `zipfile` + `lxml`로 내부 XML 직접 파싱. `parsing/hwpx_extractor.py`
 - **S3 파이프라인**: `raw/` 문서 나열 → 다운로드 → 추출 → `txts/doc_N.txt` 업로드.
   `pipeline/s3_runner.py`
+- **에러 처리**: 파일 단위 실패(다운로드 실패·암호/손상/미지원)는 `unacceptable file: {key}`
+  한 줄 찍고 건너뜀(배치 계속), S3 공통 실패(자격증명/리전/목록 조회)는 `S3 error: {e}`로 중단.
 - 검증 완료: `doc_1`(HWP, 13,234자) · `doc_2`(HWPX, 6,552자) → `s3://bid-testing/txts/`
 
 **다른 브랜치:**
@@ -83,7 +85,8 @@ python -m pipeline.s3_runner            # 실제 업로드
 ## 앞으로 할 일 (Roadmap)
 
 1. **이미지 캡션**: PDF 팀과 **동일한 이미지 분석 모델** 공유해 `[이미지:img_XXX]` 자리에 설명 삽입.
-2. **에러 처리**: 암호/손상 파일 공통 처리(현재는 정상 파일 가정).
+2. ~~**에러 처리**: 암호/손상 파일 공통 처리~~ → 파일 단위 스킵·S3 공통 실패 중단으로 처리 완료.
+   남은 것: 실패 사유 로깅 상세화(현재는 `unacceptable file`/`S3 error` 한 줄).
 3. **이미지 포함 문서 검증**: 현재 샘플 2개 모두 이미지 없음.
 4. **임베딩/에이전트 단계** 연결.
 5. `main` 병합 시 PDF(`#6`) 경로와 통합.
