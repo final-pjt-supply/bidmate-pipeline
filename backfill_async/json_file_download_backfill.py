@@ -66,6 +66,22 @@ def date_prefixes(prefix: str, start_day: datetime, end_day: datetime):
         day += timedelta(days=1)
 
 
+async def iter_curated_range(s3, bucket: str, prefix: str, start_day: datetime, end_day: datetime):
+    paginator = s3.get_paginator("list_objects_v2")
+    for day_prefix in date_prefixes(prefix, start_day, end_day):
+        async for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if not key.endswith(".json"):
+                    continue
+                response = await s3.get_object(Bucket=bucket, Key=key)
+                payload = await response["Body"].read()
+                record = json.loads(payload.decode("utf-8"))
+                for item in record if isinstance(record, list) else [record]:
+                    if isinstance(item, dict):
+                        yield key, item
+
+
 def build_file_metadata(bucket: str, record: dict, src_key: str, extracted_at: str):
     notice_id = f"{record.get('bid_ntce_no') or 'no-bid-no'}-{record.get('bid_ntce_ord') or '000'}"
     base = {
