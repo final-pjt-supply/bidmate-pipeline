@@ -278,5 +278,49 @@ async def collect_range(start_day, end_day, bucket, concurrency):
     return had_failure, False
 
 
+def parse_args():
+    today = datetime.now().strftime("%Y-%m-%d")
+    parser = argparse.ArgumentParser(
+        description="나라장터 입찰공고 백필 수집 (비동기, TOP10 기관, 입찰마감 전 공고만)"
+    )
+    parser.add_argument("--start", default=today, help="수집 시작일 YYYY-MM-DD (기본: 오늘)")
+    parser.add_argument("--end", help="수집 종료일 YYYY-MM-DD (기본: --start 와 동일)")
+    parser.add_argument("--bucket", default=BUCKET_NAME, help="S3 bucket name")
+    parser.add_argument(
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="동시 요청 수 제한 (기본: 8)"
+    )
+    return parser.parse_args()
+
+
+def main():
+    if not SERVICE_KEY:
+        raise SystemExit("환경변수 G2B_SERVICE_KEY(디코딩 키)를 먼저 설정하세요.")
+
+    args = parse_args()
+    start_day = to_day(args.start)
+    end_day = to_day(args.end) if args.end else start_day
+    if start_day > end_day:
+        raise SystemExit(f"--start({args.start})가 --end({args.end})보다 늦습니다.")
+
+    log.info(
+        "S3 bucket=%s / 수집 범위 %s ~ %s / 동시성=%s",
+        args.bucket,
+        f"{start_day:%Y-%m-%d}",
+        f"{end_day:%Y-%m-%d}",
+        args.concurrency,
+    )
+
+    had_failure, stopped_early = asyncio.run(collect_range(start_day, end_day, args.bucket, args.concurrency))
+
+    if had_failure:
+        log.error("일부 조합에서 실패가 발생했습니다. 로그를 확인하세요.")
+        sys.exit(1)
+
+    if stopped_early:
+        sys.exit(0)
+
+    log.info("수집 완료.")
+
+
 if __name__ == "__main__":
-    raise SystemExit("Task 8에서 CLI 진입점이 추가될 예정입니다.")
+    main()

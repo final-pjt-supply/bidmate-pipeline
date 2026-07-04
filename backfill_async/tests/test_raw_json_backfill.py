@@ -353,5 +353,32 @@ class TestCollectRange(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stopped_early)
 
 
+class TestParseArgs(unittest.TestCase):
+    def test_default_concurrency_is_eight(self):
+        import sys as sys_module
+
+        orig_argv = sys_module.argv
+        sys_module.argv = ["raw_json_backfill.py", "--start", "2026-06-01"]
+        try:
+            args = rjb.parse_args()
+        finally:
+            sys_module.argv = orig_argv
+
+        self.assertEqual(args.concurrency, 8)
+        self.assertEqual(args.start, "2026-06-01")
+
+    def test_concurrency_override(self):
+        import sys as sys_module
+
+        orig_argv = sys_module.argv
+        sys_module.argv = ["raw_json_backfill.py", "--start", "2026-06-01", "--concurrency", "3"]
+        try:
+            args = rjb.parse_args()
+        finally:
+            sys_module.argv = orig_argv
+
+        self.assertEqual(args.concurrency, 3)
+
+
 if __name__ == "__main__":
     unittest.main()
