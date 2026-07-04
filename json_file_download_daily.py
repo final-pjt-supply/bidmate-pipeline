@@ -115,24 +115,61 @@ def build_file_metadata(bucket: str, record: dict[str, Any], src_key: str, extra
     return files
 
 
-def file_s3_key(prefix: str, metadata: dict[str, Any], content_type: str, file_url: str):
+ORD_DIGITS = re.compile(r"\d+")
+
+
+def format_ord(value: Any) -> str:
+    match = ORD_DIGITS.search(str(value or ""))
+    return match.group(0).zfill(2) if match else "00"
+
+
+def file_stem(file_name: Any, fallback: str) -> str:
+    name = str(file_name or "").strip()
+    if not name:
+        return fallback
+    return name.rsplit(".", 1)[0] if "." in name else name
+
+
+def file_s3_key(
+    prefix: str,
+    metadata: dict[str, Any],
+    content_type: str,
+    file_url: str,
+    used_keys: set[str] | None = None,
+):
     notice_dt = parse_dt(metadata.get("bidNtceDt")) or datetime.now()
     biz_div = safe_key_part(metadata.get("업무구분"), "미분류")
     bid_no = safe_key_part(metadata.get("bidNtceNo") or metadata.get("noticeId"), "공고번호없음")
-    file_seq = safe_key_part(metadata.get("fileSeq"), "unknown")
-    original_name = str(metadata.get("fileName") or "")
-    ext = guess_ext(original_name, content_type, file_url)
-    filename = safe_key_part(original_name, f"{bid_no}_{file_seq}{ext}")
-    if "." not in filename:
-        filename = f"{filename}{ext}"
+    ord_part = format_ord(metadata.get("bidNtceOrd"))
+    kind = safe_key_part(metadata.get("fileKind") or "공고첨부", "공고첨부")
+    ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url)
+    stem = safe_key_part(file_stem(metadata.get("fileName"), bid_no), bid_no)
 
-    return (
+    notice_dir = (
         f"{prefix}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
-        f"biz_div={biz_div}/notice_id={bid_no}/{file_seq}_{filename}"
+        f"biz_div={biz_div}/bidNtceNo={bid_no}_ord={ord_part}"
     )
+    base_name = f"{stem}_{kind}"
+    key = f"{notice_dir}/{base_name}{ext}"
+    if used_keys is None:
+        return key
+
+    suffix = 2
+    while key in used_keys:
+        key = f"{notice_dir}/{base_name}_{suffix}{ext}"
+        suffix += 1
+    used_keys.add(key)
+    return key
 
 
-def upload_attachment(s3, bucket: str, session: requests.Session, metadata: dict[str, Any], timeout: int):
+def upload_attachment(
+    s3,
+    bucket: str,
+    session: requests.Session,
+    metadata: dict[str, Any],
+    timeout: int,
+    used_keys: set[str],
+):
     file_url = str(metadata.get("fileUrl") or "").strip()
     if not file_url:
         return {
@@ -148,7 +185,7 @@ def upload_attachment(s3, bucket: str, session: requests.Session, metadata: dict
     response.raw.decode_content = True
 
     content_type = response.headers.get("Content-Type", "")
-    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url)
+    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url, used_keys)
     extra_args = {"ContentType": content_type} if content_type else None
     if extra_args:
         s3.upload_fileobj(response.raw, bucket, key, ExtraArgs=extra_args)
@@ -196,11 +233,12 @@ def run(args: argparse.Namespace) -> None:
     print(f"[추출] 첨부문서 메타데이터={len(metadata)}건")
 
     success = failed = skipped = 0
+    used_keys: set[str] = set()
     with requests.Session() as session:
         for file_meta in metadata:
             label = f"{file_meta.get('bidNtceNo')}/{file_meta.get('fileSeq')}"
             try:
-                result = upload_attachment(s3, args.bucket, session, file_meta, args.timeout)
+                result = upload_attachment(s3, args.bucket, session, file_meta, args.timeout, used_keys)
                 file_meta.update(result)
                 if result["downloadStatus"] == "success":
                     success += 1
