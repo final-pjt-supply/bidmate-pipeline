@@ -16,6 +16,7 @@ transforming/output/
 
 # ── 원본/변환 샘플 문서 (sample & converted docs) ──
 # 입력 원본과 변환 결과물은 데이터라 추적하지 않는다.
+docs/
 *.hwp
 *.hwpx
 *.pdf
@@ -24,3 +25,8 @@ transforming/output/
 
 # 환경변수 파일
 .env
+
+# ── 개인 문서 (personal docs) ──
+# 로컬 작업용 문서(project.md, CLAUDE.md)와 docs/는 공유하지 않는다.
+CLAUDE.md
+project.md
