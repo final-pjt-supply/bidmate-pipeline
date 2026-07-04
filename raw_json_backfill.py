@@ -18,7 +18,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import time
 from datetime import datetime
 import requests
@@ -41,7 +40,6 @@ OPERATIONS = {
 NUM_OF_ROWS = 999
 TIMEOUT = 30
 MAX_RETRY = 3
-SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("g2b-backfill")
@@ -107,27 +105,22 @@ def is_exact_institution(record, ntce_instt_nm):
     return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
 
 
-def safe_key_part(value, fallback):
-    cleaned = SAFE_KEY.sub("_", str(value or "").strip())
-    return cleaned[:180] or fallback
-
-
-def notice_id(record, index):
-    bid_no = safe_key_part(record.get("bidNtceNo"), f"no-bid-no-{index}")
-    bid_ord = safe_key_part(record.get("bidNtceOrd"), "000")
-    return f"{bid_no}-{bid_ord}"
-
-
 def notice_day(record, fallback_dt):
     notice_dt = parse_dt(record.get("bidNtceDt")) or fallback_dt
     return datetime(notice_dt.year, notice_dt.month, notice_dt.day)
 
 
-def s3_json_key(prefix, cat, day, record, index):
-    return (
-        f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
-        f"biz_div={cat}/{notice_id(record, index)}.json"
-    )
+def group_by_day(records, now):
+    """필터링된 레코드를 공고일(notice_day) 기준으로 묶는다."""
+    groups = {}
+    for record in records:
+        day = notice_day(record, now)
+        groups.setdefault(day, []).append(record)
+    return groups
+
+
+def s3_day_json_key(prefix, cat, day):
+    return f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/biz_div={cat}.json"
 
 
 def put_json(s3, bucket, key, payload):
@@ -148,30 +141,36 @@ def collect_range(start_day, end_day, bucket):
 
     with requests.Session() as session:
         for cat, operation in OPERATIONS.items():
-            fetched_count = saved_count = 0
+            fetched_count = 0
+            filtered_records = []
 
             for ntce_instt_nm in TOP10_INSTITUTIONS:
                 records = fetch_all(session, operation, bgn_dt, end_dt, ntce_instt_nm)
                 fetched_count += len(records)
+                filtered_records.extend(
+                    record
+                    for record in records
+                    if is_exact_institution(record, ntce_instt_nm) and is_open(record, now)
+                )
 
-                for index, record in enumerate(records, start=1):
-                    if not is_exact_institution(record, ntce_instt_nm) or not is_open(record, now):
-                        continue
-
-                    day = notice_day(record, now)
-                    raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
-                    curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
-                    put_json(s3, bucket, raw_key, record)
-                    put_json(s3, bucket, curated_key, to_curated(record, cat, now))
-                    saved_count += 1
+            by_day = group_by_day(filtered_records, now)
+            saved_count = 0
+            for day, day_records in by_day.items():
+                raw_key = s3_day_json_key(RAW_PREFIX, cat, day)
+                curated_key = s3_day_json_key(CURATED_PREFIX, cat, day)
+                curated_records = [to_curated(record, cat, now) for record in day_records]
+                put_json(s3, bucket, raw_key, day_records)
+                put_json(s3, bucket, curated_key, curated_records)
+                saved_count += len(day_records)
 
             log.info(
-                "[%s ~ %s] %s: 조회 %s / S3 저장 %s건",
+                "[%s ~ %s] %s: 조회 %s / S3 저장 %s건 (%s일 분량)",
                 f"{start_day:%Y-%m-%d}",
                 f"{end_day:%Y-%m-%d}",
                 cat,
                 fetched_count,
                 saved_count,
+                len(by_day),
             )
 
 
