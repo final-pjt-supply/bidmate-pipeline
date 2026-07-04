@@ -1,8 +1,8 @@
 """S3 curated JSON에서 첨부문서 URL을 읽고 파일을 S3에 저장한다.
 
 기본 입력/출력:
-- s3://bidding-agent/raw/curated/
-- s3://bidding-agent/raw/downloads/
+- s3://bidmate/raw/curated/daily/
+- s3://bidmate/raw/downloads/daily/
 """
 
 import argparse
@@ -18,9 +18,9 @@ import requests
 
 from schema import parse_dt
 
-BUCKET_NAME = os.environ.get("S3_BUCKET", "bidding-agent")
-CURATED_PREFIX = "raw/curated"
-FILES_PREFIX = "raw/downloads"
+BUCKET_NAME = os.environ.get("S3_BUCKET", "bidmate")
+CURATED_PREFIX = "raw/curated/daily"
+FILES_PREFIX = "raw/downloads/daily"
 METADATA_PREFIX = f"{FILES_PREFIX}/_metadata"
 CHUNK_SIZE = 1024 * 256
 SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")

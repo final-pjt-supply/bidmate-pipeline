@@ -1,54 +1,61 @@
 #!/usr/bin/env python3
 """
-나라장터 입찰공고 Json 수집기.
+나라장터 입찰공고 백필 수집기.
+
+TOP10 기관(institutions.py) 대상으로 나라장터검색조건 오퍼레이션(11~14)을 조회해
+지정한 기간에 게시된 공고를 공고 1건당 raw/curated JSON 1개씩 S3에 저장한다.
+raw_json_daily.py 와 동일한 S3 파티션 구조를 사용한다.
+기본 저장 위치:
+- s3://bidmate/raw/raw/backfill/
+- s3://bidmate/raw/curated/backfill/
 
 실행 방법
 - 환경변수 G2B_SERVICE_KEY에 디코딩 키를 설정
-- python3 raw_json.py --start 2026-06-01 --end 2026-06-30
+- python3 raw_json_backfill.py --start 2026-06-01 --end 2026-06-30
 """
 
-#----------------------------------------------
-# 패키지 호출
-#----------------------------------------------
 import argparse
 import json
 import logging
 import os
+import re
 import time
-from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
 import requests
+from institutions import TOP10_INSTITUTIONS
 from schema import parse_dt, to_curated
 
-#----------------------------------------------
-# 환경변수
-#----------------------------------------------
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
+BUCKET_NAME = os.environ.get("S3_BUCKET", "bidmate")
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-BASE_DIR = Path("/Users/oloqlq/Desktop/bidding")
-RAW_DIR = BASE_DIR / "raw"
-CURATED_DIR = BASE_DIR / "curated"
+RAW_PREFIX = "raw/raw/backfill"
+CURATED_PREFIX = "raw/curated/backfill"
 
 OPERATIONS = {
-    "thng": "getBidPblancListInfoThng",
-    "cnstwk": "getBidPblancListInfoCnstwk",
-    "servc": "getBidPblancListInfoServc",
-    "frgcpt": "getBidPblancListInfoFrgcpt",
+    "cnstwk": "getBidPblancListInfoCnstwkPPSSrch",
+    "servc": "getBidPblancListInfoServcPPSSrch",
+    "frgcpt": "getBidPblancListInfoFrgcptPPSSrch",
+    "thng": "getBidPblancListInfoThngPPSSrch",
 }
 
 NUM_OF_ROWS = 999
 TIMEOUT = 30
 MAX_RETRY = 3
+SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
 
-
-#----------------------------------------------
-# 함수 정의
-#----------------------------------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("g2b")
+log = logging.getLogger("g2b-backfill")
 
-def fetch(session, operation, bgn_dt, end_dt, page_no):
+
+def s3_client():
+    try:
+        import boto3
+    except ImportError as exc:
+        raise SystemExit("S3 저장을 위해 boto3 설치가 필요합니다. 예: pip install boto3") from exc
+    return boto3.client("s3")
+
+
+def fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, page_no):
     params = {
         "serviceKey": SERVICE_KEY,
         "pageNo": page_no,
@@ -56,6 +63,7 @@ def fetch(session, operation, bgn_dt, end_dt, page_no):
         "inqryDiv": 1,
         "inqryBgnDt": bgn_dt,
         "inqryEndDt": end_dt,
+        "ntceInsttNm": ntce_instt_nm,
         "type": "json",
     }
 
@@ -73,66 +81,96 @@ def fetch(session, operation, bgn_dt, end_dt, page_no):
             raise SystemExit(f"JSON 파싱 실패 - 디코딩 키/파라미터 확인: {response.text[:200]}") from exc
         except requests.RequestException as exc:
             if attempt == MAX_RETRY:
-                raise RuntimeError(f"{operation} p{page_no} 재시도 초과: {exc}") from exc
-            log.warning("%s p%s 재시도 %s/%s: %s", operation, page_no, attempt, MAX_RETRY, exc)
+                raise RuntimeError(f"{operation}/{ntce_instt_nm} p{page_no} 재시도 초과: {exc}") from exc
+            log.warning("%s/%s p%s 재시도 %s/%s: %s", operation, ntce_instt_nm, page_no, attempt, MAX_RETRY, exc)
             time.sleep(2 ** attempt)
 
     return [], 0
 
 
-def fetch_all(session, operation, bgn_dt, end_dt):
-    records, total = fetch(session, operation, bgn_dt, end_dt, 1)
+def fetch_all(session, operation, bgn_dt, end_dt, ntce_instt_nm):
+    records, total = fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, 1)
     last_page = (total + NUM_OF_ROWS - 1) // NUM_OF_ROWS
     for page_no in range(2, last_page + 1):
         time.sleep(0.1)
-        records.extend(fetch(session, operation, bgn_dt, end_dt, page_no)[0])
+        records.extend(fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, page_no)[0])
     return records
 
 
-def group_open_records(records, start_day, end_day, now):
-    grouped = defaultdict(list)
-    for record in records:
-        close_dt = parse_dt(record.get("bidClseDt"))
-        if close_dt is not None and close_dt <= now:
-            continue
-
-        notice_dt = parse_dt(record.get("bidNtceDt")) or start_day
-        day = datetime(notice_dt.year, notice_dt.month, notice_dt.day)
-        if start_day <= day <= end_day:
-            grouped[day].append(record)
-    return grouped
+def is_open(record, now):
+    close_dt = parse_dt(record.get("bidClseDt"))
+    return close_dt is None or close_dt > now
 
 
-def save_json(root, cat, day, records):
-    out_dir = root / f"year={day:%Y}/month={day:%m}/day={day:%d}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"bid_{cat}_{day:%Y%m%d}.json"
-    path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+def is_exact_institution(record, ntce_instt_nm):
+    """ntceInsttNm 파라미터는 부분일치라 조회 대상 기관명과 완전일치하는 레코드만 남긴다."""
+    return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
 
 
-def collect_range(start_day, end_day):
+def safe_key_part(value, fallback):
+    cleaned = SAFE_KEY.sub("_", str(value or "").strip())
+    return cleaned[:180] or fallback
+
+
+def notice_id(record, index):
+    bid_no = safe_key_part(record.get("bidNtceNo"), f"no-bid-no-{index}")
+    bid_ord = safe_key_part(record.get("bidNtceOrd"), "000")
+    return f"{bid_no}-{bid_ord}"
+
+
+def notice_day(record, fallback_dt):
+    notice_dt = parse_dt(record.get("bidNtceDt")) or fallback_dt
+    return datetime(notice_dt.year, notice_dt.month, notice_dt.day)
+
+
+def s3_json_key(prefix, cat, day, record, index):
+    return (
+        f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        f"biz_div={cat}/{notice_id(record, index)}.json"
+    )
+
+
+def put_json(s3, bucket, key, payload):
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=body,
+        ContentType="application/json; charset=utf-8",
+    )
+
+
+def collect_range(start_day, end_day, bucket):
     bgn_dt = f"{start_day:%Y%m%d}0000"
     end_dt = f"{end_day:%Y%m%d}2359"
     now = datetime.now()
+    s3 = s3_client()
 
     with requests.Session() as session:
         for cat, operation in OPERATIONS.items():
-            records = fetch_all(session, operation, bgn_dt, end_dt)
-            grouped = group_open_records(records, start_day, end_day, now)
-            saved_count = 0
+            fetched_count = saved_count = 0
 
-            for day, day_records in sorted(grouped.items()):
-                save_json(RAW_DIR, cat, day, day_records)
-                save_json(CURATED_DIR, cat, day, [to_curated(record, cat, now) for record in day_records])
-                saved_count += len(day_records)
+            for ntce_instt_nm in TOP10_INSTITUTIONS:
+                records = fetch_all(session, operation, bgn_dt, end_dt, ntce_instt_nm)
+                fetched_count += len(records)
+
+                for index, record in enumerate(records, start=1):
+                    if not is_exact_institution(record, ntce_instt_nm) or not is_open(record, now):
+                        continue
+
+                    day = notice_day(record, now)
+                    raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
+                    curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
+                    put_json(s3, bucket, raw_key, record)
+                    put_json(s3, bucket, curated_key, to_curated(record, cat, now))
+                    saved_count += 1
 
             log.info(
-                "[%s ~ %s] %s: 조회 %s / 마감전 %s건 저장",
+                "[%s ~ %s] %s: 조회 %s / S3 저장 %s건",
                 f"{start_day:%Y-%m-%d}",
                 f"{end_day:%Y-%m-%d}",
                 cat,
-                len(records),
+                fetched_count,
                 saved_count,
             )
 
@@ -149,9 +187,10 @@ def to_day(value):
 
 def parse_args():
     today = datetime.now().strftime("%Y-%m-%d")
-    parser = argparse.ArgumentParser(description="나라장터 입찰공고 수집 (입찰마감 전 공고만)")
+    parser = argparse.ArgumentParser(description="나라장터 입찰공고 백필 수집 (TOP10 기관, 입찰마감 전 공고만)")
     parser.add_argument("--start", default=today, help="수집 시작일 YYYY-MM-DD (기본: 오늘)")
     parser.add_argument("--end", help="수집 종료일 YYYY-MM-DD (기본: --start 와 동일)")
+    parser.add_argument("--bucket", default=BUCKET_NAME, help="S3 bucket name")
     return parser.parse_args()
 
 
@@ -165,14 +204,15 @@ def main():
     if start_day > end_day:
         raise SystemExit(f"--start({args.start})가 --end({args.end})보다 늦습니다.")
 
-    log.info("수집 범위 %s ~ %s", f"{start_day:%Y-%m-%d}", f"{end_day:%Y-%m-%d}")
-    collect_range(start_day, end_day)
+    log.info(
+        "S3 bucket=%s / 수집 범위 %s ~ %s",
+        args.bucket,
+        f"{start_day:%Y-%m-%d}",
+        f"{end_day:%Y-%m-%d}",
+    )
+    collect_range(start_day, end_day, args.bucket)
     log.info("수집 완료.")
 
 
-
-#----------------------------------------------
-# 메인 실행
-#----------------------------------------------
 if __name__ == "__main__":
     main()

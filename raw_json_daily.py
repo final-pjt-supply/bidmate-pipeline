@@ -2,10 +2,11 @@
 """
 나라장터 입찰공고 5분 단위 준실시간 수집기.
 
-최근 N분 동안 등록된 공고를 조회해 공고 1건당 raw/curated JSON 1개씩 S3에 저장한다.
+TOP10 기관(institutions.py) 대상으로 나라장터검색조건 오퍼레이션(11~14)을 조회해
+최근 N분 동안 등록된 공고를 공고 1건당 raw/curated JSON 1개씩 S3에 저장한다.
 기본 저장 위치:
-- s3://bidding-agent/raw/raw/
-- s3://bidding-agent/raw/curated/
+- s3://bidmate/raw/raw/daily/
+- s3://bidmate/raw/curated/daily/
 """
 
 import argparse
@@ -16,19 +17,20 @@ import re
 import time
 from datetime import datetime, timedelta
 import requests
+from institutions import TOP10_INSTITUTIONS
 from schema import parse_dt, to_curated
 
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
-BUCKET_NAME = os.environ.get("S3_BUCKET", "bidding-agent")
+BUCKET_NAME = os.environ.get("S3_BUCKET", "bidmate")
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-RAW_PREFIX = "raw/raw"
-CURATED_PREFIX = "raw/curated"
+RAW_PREFIX = "raw/raw/daily"
+CURATED_PREFIX = "raw/curated/daily"
 
 OPERATIONS = {
-    "thng": "getBidPblancListInfoThng",
-    "cnstwk": "getBidPblancListInfoCnstwk",
-    "servc": "getBidPblancListInfoServc",
-    "frgcpt": "getBidPblancListInfoFrgcpt",
+    "cnstwk": "getBidPblancListInfoCnstwkPPSSrch",
+    "servc": "getBidPblancListInfoServcPPSSrch",
+    "frgcpt": "getBidPblancListInfoFrgcptPPSSrch",
+    "thng": "getBidPblancListInfoThngPPSSrch",
 }
 
 NUM_OF_ROWS = 999
@@ -47,7 +49,7 @@ def s3_client():
         raise SystemExit("S3 저장을 위해 boto3 설치가 필요합니다. 예: pip install boto3") from exc
     return boto3.client("s3")
 
-def fetch(session, operation, bgn_dt, end_dt, page_no):
+def fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, page_no):
     params = {
         "serviceKey": SERVICE_KEY,
         "pageNo": page_no,
@@ -55,6 +57,7 @@ def fetch(session, operation, bgn_dt, end_dt, page_no):
         "inqryDiv": 1,
         "inqryBgnDt": bgn_dt,
         "inqryEndDt": end_dt,
+        "ntceInsttNm": ntce_instt_nm,
         "type": "json",
     }
 
@@ -72,25 +75,30 @@ def fetch(session, operation, bgn_dt, end_dt, page_no):
             raise SystemExit(f"JSON 파싱 실패 - 디코딩 키/파라미터 확인: {response.text[:200]}") from exc
         except requests.RequestException as exc:
             if attempt == MAX_RETRY:
-                raise RuntimeError(f"{operation} p{page_no} 재시도 초과: {exc}") from exc
-            log.warning("%s p%s 재시도 %s/%s: %s", operation, page_no, attempt, MAX_RETRY, exc)
+                raise RuntimeError(f"{operation}/{ntce_instt_nm} p{page_no} 재시도 초과: {exc}") from exc
+            log.warning("%s/%s p%s 재시도 %s/%s: %s", operation, ntce_instt_nm, page_no, attempt, MAX_RETRY, exc)
             time.sleep(2 ** attempt)
 
     return [], 0
 
 
-def fetch_all(session, operation, bgn_dt, end_dt):
-    records, total = fetch(session, operation, bgn_dt, end_dt, 1)
+def fetch_all(session, operation, bgn_dt, end_dt, ntce_instt_nm):
+    records, total = fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, 1)
     last_page = (total + NUM_OF_ROWS - 1) // NUM_OF_ROWS
     for page_no in range(2, last_page + 1):
         time.sleep(0.1)
-        records.extend(fetch(session, operation, bgn_dt, end_dt, page_no)[0])
+        records.extend(fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, page_no)[0])
     return records
 
 
 def is_open(record, now):
     close_dt = parse_dt(record.get("bidClseDt"))
     return close_dt is None or close_dt > now
+
+
+def is_exact_institution(record, ntce_instt_nm):
+    """ntceInsttNm 파라미터는 부분일치라 조회 대상 기관명과 완전일치하는 레코드만 남긴다."""
+    return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
 
 
 def in_window(record, window_start, window_end):
@@ -138,26 +146,33 @@ def collect_window(window_start, window_end, bucket):
 
     with requests.Session() as session:
         for cat, operation in OPERATIONS.items():
-            records = fetch_all(session, operation, bgn_dt, end_dt)
-            saved_count = 0
+            fetched_count = saved_count = 0
 
-            for index, record in enumerate(records, start=1):
-                if not in_window(record, window_start, window_end) or not is_open(record, window_end):
-                    continue
+            for ntce_instt_nm in TOP10_INSTITUTIONS:
+                records = fetch_all(session, operation, bgn_dt, end_dt, ntce_instt_nm)
+                fetched_count += len(records)
 
-                day = notice_day(record, window_end)
-                raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
-                curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
-                put_json(s3, bucket, raw_key, record)
-                put_json(s3, bucket, curated_key, to_curated(record, cat, window_end))
-                saved_count += 1
+                for index, record in enumerate(records, start=1):
+                    if (
+                        not is_exact_institution(record, ntce_instt_nm)
+                        or not in_window(record, window_start, window_end)
+                        or not is_open(record, window_end)
+                    ):
+                        continue
+
+                    day = notice_day(record, window_end)
+                    raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
+                    curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
+                    put_json(s3, bucket, raw_key, record)
+                    put_json(s3, bucket, curated_key, to_curated(record, cat, window_end))
+                    saved_count += 1
 
             log.info(
                 "[%s ~ %s] %s: 조회 %s / S3 저장 %s건",
                 f"{window_start:%Y-%m-%d %H:%M}",
                 f"{window_end:%Y-%m-%d %H:%M}",
                 cat,
-                len(records),
+                fetched_count,
                 saved_count,
             )
 
