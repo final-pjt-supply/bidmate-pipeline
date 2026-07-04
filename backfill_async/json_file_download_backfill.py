@@ -193,5 +193,128 @@ async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: in
     }
 
 
+def s3_session():
+    try:
+        import aioboto3
+    except ImportError as exc:
+        raise SystemExit("S3 사용을 위해 aioboto3 설치가 필요합니다. 예: pip install aioboto3") from exc
+    return aioboto3.Session()
+
+
+async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> str:
+    key = (
+        f"{METADATA_PREFIX}/year={run_dt:%Y}/month={run_dt:%m}/day={run_dt:%d}/"
+        f"bid_files_backfill_{run_dt:%Y%m%d%H%M%S}.json"
+    )
+    await s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
+    return key
+
+
+async def run(args: argparse.Namespace) -> None:
+    session = s3_session()
+    run_dt = datetime.now()
+    extracted_at = run_dt.isoformat()
+    sem = asyncio.Semaphore(args.concurrency)
+
+    async with session.client("s3") as s3:
+        metadata = []
+        curated_count = 0
+        async for src_key, record in iter_curated_range(s3, args.bucket, args.curated_prefix, args.start, args.end):
+            curated_count += 1
+            metadata.extend(build_file_metadata(args.bucket, record, src_key, extracted_at))
+
+        print(f"[시작] {args.start:%Y-%m-%d} ~ {args.end:%Y-%m-%d} curated JSON={curated_count}건")
+        print(f"[추출] 첨부문서 메타데이터={len(metadata)}건")
+
+        used_keys: set = set()
+
+        async def bound_download(client, file_meta):
+            async with sem:
+                return await upload_attachment(s3, args.bucket, client, file_meta, args.timeout, used_keys)
+
+        async with httpx.AsyncClient() as client:
+            results = await asyncio.gather(
+                *(bound_download(client, file_meta) for file_meta in metadata),
+                return_exceptions=True,
+            )
+
+        success = failed = skipped = 0
+        for file_meta, result in zip(metadata, results):
+            label = f"{file_meta.get('bidNtceNo')}/{file_meta.get('fileSeq')}"
+            if isinstance(result, Exception):
+                failed += 1
+                file_meta.update(
+                    {
+                        "downloadStatus": "failed",
+                        "downloadPath": "",
+                        "downloadSize": 0,
+                        "contentType": "",
+                        "downloadError": str(result)[:1000],
+                    }
+                )
+                print(f"[실패] {label}: {result}")
+                continue
+
+            file_meta.update(result)
+            if result["downloadStatus"] == "success":
+                success += 1
+                print(f"[성공] {label} -> {result['downloadPath']}")
+            else:
+                skipped += 1
+                print(f"[건너뜀] {label}: {result['downloadError']}")
+
+        manifest_key = await put_manifest(s3, args.bucket, metadata, run_dt)
+
+    print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
+    print(f"[완료] 다운로드 성공={success}건, 실패={failed}건, 건너뜀={skipped}건")
+
+
+def positive_int(value):
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("양의 정수를 입력하세요.")
+    return number
+
+
+def to_day(value):
+    value = value.replace("/", "-")
+    for date_format in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(value, date_format)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(f"날짜 형식 오류: {value} (예: 2026-06-01)")
+
+
+def parse_args() -> argparse.Namespace:
+    today = datetime.now().strftime("%Y-%m-%d")
+    parser = argparse.ArgumentParser(description="S3 curated JSON 첨부문서 백필 다운로드 도구 (비동기)")
+    parser.add_argument("--bucket", default=BUCKET_NAME, help="S3 bucket name")
+    parser.add_argument("--curated-prefix", default=CURATED_PREFIX, help="curated JSON S3 prefix")
+    parser.add_argument("--start", type=to_day, default=today, help="다운로드 대상 시작일 YYYY-MM-DD (기본: 오늘)")
+    parser.add_argument("--end", type=to_day, help="다운로드 대상 종료일 YYYY-MM-DD (기본: --start 와 동일)")
+    parser.add_argument("--timeout", type=positive_int, default=60, help="파일 다운로드 제한 시간 초")
+    parser.add_argument(
+        "--concurrency", type=positive_int, default=DEFAULT_CONCURRENCY, help="동시 다운로드 수 제한 (기본: 8)"
+    )
+    args = parser.parse_args()
+    args.end = args.end or args.start
+    if args.start > args.end:
+        parser.error(f"--start({args.start:%Y-%m-%d})가 --end({args.end:%Y-%m-%d})보다 늦습니다.")
+    return args
+
+
+def main() -> None:
+    try:
+        asyncio.run(run(parse_args()))
+    except Exception as exc:
+        raise SystemExit(f"실패: {exc}") from None
+
+
 if __name__ == "__main__":
-    raise SystemExit("Task 12에서 CLI 진입점이 추가될 예정입니다.")
+    main()

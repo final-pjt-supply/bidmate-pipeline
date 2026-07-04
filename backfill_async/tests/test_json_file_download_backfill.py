@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from datetime import datetime
 
@@ -200,6 +201,39 @@ class TestUploadAttachment(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(httpx.ConnectError):
             await jfd.upload_attachment(s3, "bidmate", client, self.base_metadata(), 30, set())
+
+
+class TestRunFailureIsolation(unittest.IsolatedAsyncioTestCase):
+    async def test_one_file_failure_does_not_block_others(self):
+        metadata_list = [
+            {"bidNtceNo": "1", "fileSeq": "1", "fileUrl": "http://x/ok.hwp"},
+            {"bidNtceNo": "2", "fileSeq": "1", "fileUrl": "http://x/bad.hwp"},
+            {"bidNtceNo": "3", "fileSeq": "1", "fileUrl": "http://x/ok2.hwp"},
+        ]
+
+        async def fake_upload(s3, bucket, client, meta, timeout, used_keys):
+            if meta["bidNtceNo"] == "2":
+                raise RuntimeError("download exploded")
+            return {
+                "downloadStatus": "success",
+                "downloadPath": f"s3://bidmate/{meta['bidNtceNo']}",
+                "downloadSize": 1,
+                "contentType": "application/x-hwp",
+                "downloadError": "",
+            }
+
+        sem = asyncio.Semaphore(2)
+
+        async def bound(meta):
+            async with sem:
+                return await fake_upload(None, "bidmate", None, meta, 30, set())
+
+        results = await asyncio.gather(*(bound(m) for m in metadata_list), return_exceptions=True)
+
+        successes = [r for r in results if not isinstance(r, Exception)]
+        failures = [r for r in results if isinstance(r, Exception)]
+        self.assertEqual(len(successes), 2)
+        self.assertEqual(len(failures), 1)
 
 
 if __name__ == "__main__":
