@@ -1,5 +1,8 @@
+import asyncio
 import unittest
 from datetime import datetime
+
+import httpx
 
 from backfill_async import raw_json_backfill as rjb
 
@@ -67,6 +70,68 @@ class TestToDay(unittest.TestCase):
 
     def test_parses_compact_date(self):
         self.assertEqual(rjb.to_day("20260601"), datetime(2026, 6, 1))
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def make_page_payload(items, total):
+    return {"response": {"body": {"totalCount": total, "items": items}}}
+
+
+class FakeFailThenSucceedClient:
+    """처음 N-1번은 예외를 던지고 마지막에 성공하는 가짜 httpx client."""
+
+    def __init__(self, fail_times, payload):
+        self.fail_times = fail_times
+        self.payload = payload
+        self.calls = 0
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise httpx.ConnectError("boom", request=None)
+        return FakeResponse(self.payload)
+
+
+class TestFetchPageRetry(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # 지수 백오프 실제 대기를 없애 테스트를 빠르게 한다.
+        self._orig_sleep = asyncio.sleep
+        asyncio.sleep = lambda *_args, **_kwargs: self._orig_sleep(0)
+
+    async def asyncTearDown(self):
+        asyncio.sleep = self._orig_sleep
+
+    async def test_succeeds_after_transient_failures(self):
+        client = FakeFailThenSucceedClient(fail_times=2, payload=make_page_payload([{"bidNtceNo": "1"}], 1))
+        sem = asyncio.Semaphore(1)
+        counter = rjb.CallCounter()
+
+        records, total = await rjb.fetch_page(client, sem, counter, "op", "202606010000", "202606012359", "조달청", 1)
+
+        self.assertEqual(records, [{"bidNtceNo": "1"}])
+        self.assertEqual(total, 1)
+        self.assertEqual(client.calls, 3)
+        self.assertEqual(counter.count, 3)
+
+    async def test_raises_after_max_retry_exhausted(self):
+        client = FakeFailThenSucceedClient(fail_times=99, payload=make_page_payload([], 0))
+        sem = asyncio.Semaphore(1)
+        counter = rjb.CallCounter()
+
+        with self.assertRaises(RuntimeError):
+            await rjb.fetch_page(client, sem, counter, "op", "202606010000", "202606012359", "조달청", 1)
+
+        self.assertEqual(client.calls, rjb.MAX_RETRY)
 
 
 if __name__ == "__main__":

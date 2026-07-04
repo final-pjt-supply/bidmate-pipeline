@@ -97,5 +97,55 @@ def to_day(value):
     raise SystemExit(f"날짜 형식 오류: {value} (예: 2026-06-01)")
 
 
+class CallCounter:
+    """이번 실행 1회 기준으로 API 호출 수를 누적하는 단순 카운터.
+
+    같은 날 스크립트를 여러 번 실행하면 각 실행이 독립적으로 카운트하므로
+    실제 조달청 일일 한도(10만)를 실행 횟수 합산 기준으로는 보장하지 못한다.
+    """
+
+    def __init__(self):
+        self.count = 0
+
+    def increment(self):
+        self.count += 1
+
+
+async def fetch_page(client, sem, counter, operation, bgn_dt, end_dt, ntce_instt_nm, page_no):
+    params = {
+        "serviceKey": SERVICE_KEY,
+        "pageNo": page_no,
+        "numOfRows": NUM_OF_ROWS,
+        "inqryDiv": 1,
+        "inqryBgnDt": bgn_dt,
+        "inqryEndDt": end_dt,
+        "ntceInsttNm": ntce_instt_nm,
+        "type": "json",
+    }
+
+    async with sem:
+        for attempt in range(1, MAX_RETRY + 1):
+            try:
+                # 재시도도 실제 API 호출이므로 실패한 시도도 카운트에 포함한다.
+                counter.increment()
+                response = await client.get(f"{BASE_URL}/{operation}", params=params, timeout=TIMEOUT)
+                response.raise_for_status()
+                body = response.json().get("response", {}).get("body", {})
+                total = int(body.get("totalCount") or 0)
+                items = body.get("items") or []
+                if isinstance(items, dict):
+                    items = items.get("item") or []
+                return (items if isinstance(items, list) else [items]), total
+            except (httpx.HTTPError, ValueError) as exc:
+                if attempt == MAX_RETRY:
+                    raise RuntimeError(f"{operation}/{ntce_instt_nm} p{page_no} 재시도 초과: {exc}") from exc
+                log.warning(
+                    "%s/%s p%s 재시도 %s/%s: %s", operation, ntce_instt_nm, page_no, attempt, MAX_RETRY, exc
+                )
+                await asyncio.sleep(2 ** attempt)
+
+    return [], 0
+
+
 if __name__ == "__main__":
     raise SystemExit("Task 8에서 CLI 진입점이 추가될 예정입니다.")
