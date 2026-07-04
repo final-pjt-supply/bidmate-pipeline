@@ -111,6 +111,16 @@ class CallCounter:
         self.count += 1
 
 
+class G2BApiError(RuntimeError):
+    """조달청 API가 정상 response 대신 에러 응답(예: 입력범위값 초과)을 반환했을 때 발생.
+
+    HTTP 상태코드는 200으로 오고 JSON 파싱도 성공하기 때문에, 이 검사가 없으면
+    fetch_page가 조용히 (빈 리스트, 0)을 반환해 실제로는 실패한 조회가 "0건"으로
+    둔갑한다. 이 에러는 같은 파라미터로 재시도해도 결과가 달라지지 않으므로
+    MAX_RETRY 루프 밖에서 즉시 발생시킨다.
+    """
+
+
 async def fetch_page(client, sem, counter, operation, bgn_dt, end_dt, ntce_instt_nm, page_no):
     params = {
         "serviceKey": SERVICE_KEY,
@@ -130,7 +140,14 @@ async def fetch_page(client, sem, counter, operation, bgn_dt, end_dt, ntce_instt
                 counter.increment()
                 response = await client.get(f"{BASE_URL}/{operation}", params=params, timeout=TIMEOUT)
                 response.raise_for_status()
-                body = response.json().get("response", {}).get("body", {})
+                payload = response.json()
+                if "response" not in payload:
+                    error = payload.get("nkoneps.com.response.ResponseError", {}).get("header", {})
+                    raise G2BApiError(
+                        f"{operation}/{ntce_instt_nm} p{page_no} API 에러 응답: "
+                        f"{error.get('resultCode', '?')} {error.get('resultMsg', '알 수 없음')}"
+                    )
+                body = payload["response"].get("body", {})
                 total = int(body.get("totalCount") or 0)
                 items = body.get("items") or []
                 if isinstance(items, dict):

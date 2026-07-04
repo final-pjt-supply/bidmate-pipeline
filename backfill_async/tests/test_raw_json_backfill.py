@@ -103,6 +103,38 @@ class FakeFailThenSucceedClient:
         return FakeResponse(self.payload)
 
 
+class ErrorShapedResponseClient:
+    """조달청 API가 정상 response 대신 nkoneps 에러 응답을 돌려주는 상황을 흉내낸다."""
+
+    def __init__(self, result_code, result_msg):
+        self.result_code = result_code
+        self.result_msg = result_msg
+        self.calls = 0
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        return FakeResponse(
+            {
+                "nkoneps.com.response.ResponseError": {
+                    "header": {"resultCode": self.result_code, "resultMsg": self.result_msg}
+                }
+            }
+        )
+
+
+class TestFetchPageErrorResponse(unittest.IsolatedAsyncioTestCase):
+    async def test_raises_immediately_without_retry_on_error_shaped_response(self):
+        client = ErrorShapedResponseClient("07", "입력범위값 초과 에러")
+        sem = asyncio.Semaphore(1)
+        counter = rjb.CallCounter()
+
+        with self.assertRaises(rjb.G2BApiError):
+            await rjb.fetch_page(client, sem, counter, "op", "202601010000", "202606302359", "조달청", 1)
+
+        self.assertEqual(client.calls, 1)  # 재시도 없이 즉시 실패
+        self.assertEqual(counter.count, 1)
+
+
 class TestFetchPageRetry(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # 지수 백오프 실제 대기를 없애 테스트를 빠르게 한다.
