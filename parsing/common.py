@@ -13,13 +13,30 @@ from parsing.contract import TABLE_OPEN, TABLE_CLOSE, image_placeholder
 def register_image(ctx: dict, source_type: str, ref) -> str:
     """이미지를 registry에 등록하고 위치 placeholder 문자열을 반환.
 
-    ctx = {"n": int, "images": dict}. ref는 형식별 식별자(HWP bindata-id,
-    HWPX binaryItemIDRef 등).
+    ctx = {"n": int, "images": dict, "resolve": fn|None, "describe_fn": fn|None}.
+    ref는 형식별 식별자(HWP bindata-id, HWPX binaryItemIDRef 등).
+
+    resolve(ref) -> bytes|None 가 주어지면 이미지 바이트를 얻고, describe_fn(bytes)
+    -> str|None 가 주어지면 캡션을 만들어 placeholder에 인라인으로 붙인다. 둘 중
+    하나라도 없거나 실패(None)하면 캡션 없이 placeholder만 남긴다(그 이미지만 스킵).
     """
     ctx["n"] += 1
     img_id = f"img_{ctx['n']:03d}"
     ctx["images"][img_id] = {"source_type": source_type, "ref": ref}
-    return image_placeholder(img_id)
+
+    caption = None
+    resolve = ctx.get("resolve")
+    describe_fn = ctx.get("describe_fn")
+    if resolve is not None and describe_fn is not None:
+        image_bytes = resolve(ref)
+        # --- 장식 이미지 필터 (현재 비활성) ---
+        # 로고·구분선·아이콘 같은 자잘한 장식 이미지가 발견되면, 아래 한 줄로
+        # 캡션을 생략한다(원본 픽셀 크기·종횡비 기준). 지금은 전부 설명한다.
+        # if image_bytes and is_decorative(image_bytes): image_bytes = None
+        if image_bytes:
+            caption = describe_fn(image_bytes)
+
+    return image_placeholder(img_id, caption)
 
 
 def format_table(rows: list[list[str]]) -> str:

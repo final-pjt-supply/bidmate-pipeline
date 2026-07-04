@@ -11,21 +11,21 @@ __all__ = [
 ]
 
 
-def extract(path: str) -> ExtractResult:
+def extract(path: str, describe_fn=None) -> ExtractResult:
     ext = os.path.splitext(path)[1].lower()
     if ext == ".hwpx":
-        return extract_hwpx_file(path)
+        return extract_hwpx_file(path, describe_fn=describe_fn)
     if ext == ".hwp":
-        return extract_hwp_file(path)
+        return extract_hwp_file(path, describe_fn=describe_fn)
     raise ValueError(f"지원하지 않는 형식: {ext}")
 
 
-def extract_bytes(data: bytes, filename: str) -> ExtractResult:
+def extract_bytes(data: bytes, filename: str, describe_fn=None) -> ExtractResult:
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".hwpx":
-        return extract_hwpx(data)
+        return extract_hwpx(data, describe_fn=describe_fn)
     if ext == ".hwp":
-        return extract_hwp(data)
+        return extract_hwp(data, describe_fn=describe_fn)
     raise ValueError(f"지원하지 않는 형식: {ext}")
 
 
