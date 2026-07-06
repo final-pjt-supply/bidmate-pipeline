@@ -14,7 +14,7 @@ import zlib
 from lxml import etree
 
 from parsing.contract import ExtractResult
-from parsing.common import register_image, format_table, normalize_text
+from parsing.hwp.common import register_image, format_table, normalize_text
 
 # 실행 파일 경로. 기본은 PATH의 hwp5proc, HWP5PROC_PATH 환경변수로 재정의 가능.
 HWP5PROC = os.getenv("HWP5PROC_PATH", "hwp5proc")
