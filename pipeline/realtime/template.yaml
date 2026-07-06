@@ -1,0 +1,14 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  실시간 입찰공고 문서 처리 파이프라인.
+  S3 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → Lambda 텍스트 추출.
+
+# TODO: 아래 리소스 정의 (기획 확정 후 채우기)
+# - Queue: PdfQueue / HwpQueue / HwpxQueue (+ 각각 DLQ, RedrivePolicy)
+# - Function: ExtractPdfFunction / ExtractHwpFunction / ExtractHwpxFunction
+#   - CodeUri: src/, Handler: handlers.extract_{pdf,hwp,hwpx}.lambda_handler
+#   - Events: 대응하는 큐를 SQS 트리거로 연결
+# - S3 이벤트 알림: 원본 버킷 → 확장자별 큐로 라우팅 (NotificationConfiguration)
+
+Resources: {}

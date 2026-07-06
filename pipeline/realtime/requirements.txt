@@ -1,0 +1,1 @@
+# TODO: 추출기별 의존성 확정 후 채우기 (예: pymupdf — extractors/pdf.py)
