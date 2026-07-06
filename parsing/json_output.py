@@ -2,6 +2,8 @@
 """추출 결과를 페이지 분할 JSON으로 변환하는 출력 포맷 로직.
 
 - paginate: 본문을 10000자 단위로 분할(줄 경계, [표]…[/표]는 미분할).
+- to_json_doc: 추출 결과를 페이지 분할 JSON 스키마 dict로 변환.
+- parse_doc_filename: 파일명에서 bid_ntce_no·document_id 파싱.
 """
 import re
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""S3 파이프라인: raw/ 문서를 txt로 추출해 txts/ 에 doc_N.txt 로 업로드.
+"""S3 파이프라인: raw/ 문서를 페이지 분할 JSON으로 추출해 업로드.
 
 .env 에서 자격증명·리전·소스/대상 버킷 주소를 읽는다.
   AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY,
@@ -57,7 +57,7 @@ def run(dry_run: bool = False):
         parsed = parse_doc_filename(stem)
         if parsed is None:
             # 파일명이 {공고번호}_{차수}_doc_{n} 규약과 다르면 건너뜀
-            print(f"unacceptable file: {key}")
+            print(f"unacceptable filename: {key}")
             continue
         bid_ntce_no, document_id = parsed
         try:
