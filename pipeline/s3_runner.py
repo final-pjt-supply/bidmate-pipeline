@@ -5,13 +5,15 @@
   AWS_REGION, AWS_ACCESS_KEY, AWS_SECRET_KEY,
   BUCKET_SRC_ADDRESS(s3://.../raw/), BUCKET_LOC_ADDRESS(s3://.../txts/)
 """
+import json
 import os
 from urllib.parse import urlparse
 
 import boto3
 from dotenv import find_dotenv, load_dotenv
 
-from parsing import extract_bytes, to_txt
+from parsing import extract_bytes
+from parsing.json_output import parse_doc_filename, to_json_doc
 
 # 이미지 캡션은 현재 파이프라인에서 연결 해제 상태(위치 placeholder만 추출).
 # 재연결하려면 parsing.hwp_image_describer.make_describer()로 describe_fn을 만들어
@@ -50,26 +52,34 @@ def run(dry_run: bool = False):
     dst_bucket, dst_prefix = _parse_uri(dst_uri)
 
     results = []
-    for i, key in enumerate(keys, 1):
+    for key in keys:
+        stem = os.path.splitext(os.path.basename(key))[0]
+        parsed = parse_doc_filename(stem)
+        if parsed is None:
+            # 파일명이 {공고번호}_{차수}_doc_{n} 규약과 다르면 건너뜀
+            print(f"unacceptable file: {key}")
+            continue
+        bid_ntce_no, document_id = parsed
         try:
             data = s3.get_object(Bucket=src_bucket, Key=key)["Body"].read()
             result = extract_bytes(data, key)
-            txt = to_txt(result)
+            doc = to_json_doc(result, bid_ntce_no, document_id)
         except Exception:
             # 다운로드 실패·읽을 수 없는 문서(암호/손상/미지원)는 건너뛰고 배치는 계속 진행
             print(f"unacceptable file: {key}")
             continue
-        out_key = f"{dst_prefix}doc_{i}.txt"
+        body = json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8")
+        out_key = f"{dst_prefix}{stem}.json"
         if not dry_run:
             s3.put_object(
                 Bucket=dst_bucket, Key=out_key,
-                Body=txt.encode("utf-8"),
-                ContentType="text/plain; charset=utf-8",
+                Body=body,
+                ContentType="application/json; charset=utf-8",
             )
         results.append({
             "src_key": key, "out_key": out_key,
             "source_type": result["source_type"],
-            "chars": len(txt), "images": len(result["images"]),
+            "pages": len(doc["pages"]), "images": len(result["images"]),
         })
     return results
 
@@ -87,4 +97,4 @@ if __name__ == "__main__":
     for r in results:
         arrow = "(dry-run, 업로드 안 함)" if dry else "->"
         print(f"[{r['source_type']}] {r['src_key']}  {arrow}  "
-              f"{r['out_key']}  ({r['chars']}자, 이미지 {r['images']}개)")
+              f"{r['out_key']}  ({r['pages']}페이지, 이미지 {r['images']}개)")
