@@ -82,11 +82,11 @@ s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/
 세 prefix 모두 `year=YYYY/month=MM/day=DD` Hive 파티션을 따르며, `backfill/`과 `daily/`는
 쓰는 스크립트와 읽는 스크립트가 항상 짝을 이룬다 (backfill 수집분은 backfill 다운로더만 소비).
 
-저장 단위는 파이프라인별로 다르다:
+저장 단위와 파일명 규칙은 daily/backfill 모두 공고 단위를 기준으로 맞춘다:
 
 | | daily | backfill |
 |---|---|---|
-| raw/curated 저장 단위 | 공고 1건 = JSON 1개 (`{bidNtceNo}-{ord}.json`) | 하루+업무구분 = 배열 JSON 1개 (`biz_div={cat}.json`) |
+| raw/curated 저장 단위 | 공고 1건 = JSON 1개 (`biz_div={cat}/{bidNtceNo}-{ord}.json`) | 동일 |
 | 다운로드 폴더 | `{공고번호}_{차수}` 공고 단위 폴더 | 동일 |
 | 파일명 규칙 | `{공고번호}_{차수}_doc{NN}{확장자}` — 원본 파일명 미사용 | 동일 |
 
@@ -100,8 +100,8 @@ s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/
   예: `20260700001_00/20260700001_00_doc01.hwpx`). 원본 파일명·종류(공고첨부/표준공고서)와
   제외 사유는 manifest(`fileName`, `fileKind`, `downloadError`)에서 추적한다.
 
-다운로드 단계는 curated를 읽을 때 단건 dict와 배열을 모두 지원하므로
-daily 산출물(단건)과 backfill 산출물(배열)을 같은 코드로 처리한다.
+다운로드 단계는 curated를 읽을 때 단건 dict를 기본으로 처리한다.
+기존 배열 JSON도 방어적으로 지원하므로 과거 산출물이 남아 있어도 같은 코드로 처리한다.
 
 ## 3. backfill 파이프라인 vs daily 파이프라인
 
@@ -114,7 +114,7 @@ daily 산출물(단건)과 backfill 산출물(배열)을 같은 코드로 처리
 | 실행 주체 | 스케줄러(Airflow 전환 예정)가 5분마다 | 사람이 필요할 때 수동 실행 |
 | **마감 공고 필터** | **적용** (`is_open`: 마감 지난 공고 제외) | **미적용** — 이력 수집이 목적이므로 마감된 공고도 전부 보존 |
 | 시간창 필터 | `in_window`: 게시시각이 조회창 안인 것만 | 없음 (날짜 범위 자체가 조건) |
-| 저장 단위 | 공고 1건 = 1 JSON | 하루+업무구분 = 배열 1 JSON |
+| 저장 단위 | 공고 1건 = 1 JSON | 공고 1건 = 1 JSON |
 | 호출량 | 회당 40콜 내외로 미미 | 기간에 비례해 커짐 → **호출 예산 관리 필요** |
 
 > 이 차이는 실제 버그로 검증됐다: 초기 비동기 backfill이 daily용 `is_open` 필터를
@@ -229,9 +229,9 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
 - `raw/raw`, `raw/curated`, `raw/downloads` 세 prefix 모두에 `backfill/`·`daily/` 하위 폴더를
   도입했다. 쓰는 스크립트와 읽는 스크립트의 대응 관계(daily 수집분은 daily 다운로더만 소비)를
   경로 구조 자체로 강제하기 위함이다.
-- backfill 저장 단위를 "레코드별 JSON"에서 "하루+업무구분 배열 JSON 1개"로 바꾸면서,
-  레코드 단위 키를 만들던 `notice_id()`/`s3_json_key()`와 그로 인해 미사용이 된
-  `safe_key_part()`/`SAFE_KEY`를 수집 스크립트에서 제거했다.
+- backfill 저장 단위는 한때 "하루+업무구분 배열 JSON 1개"로 단순화했으나, 공고 단위
+  재처리와 `raw_s3_key` 추적을 명확하게 하기 위해 다시 "공고 1건 = JSON 1개"로 맞췄다.
+  backfill 수집 스크립트도 daily와 같은 `{bidNtceNo}-{ord}.json` 키를 사용한다.
 - 첨부파일 키는 `notice_id={번호}/{fileSeq}_{파일명}` → `bidNtceNo={번호}_ord={2자리}/{stem}_{kind}{확장자}`
   구조로 변경했다.
   - `ord`는 `bidNtceOrd`에서 숫자만 추출해 `zfill(2)` (없으면 `00`).

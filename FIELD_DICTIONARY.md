@@ -164,7 +164,7 @@ cnstwk/servc 표본으로 재확인 필요.
 |---|---|---|
 | `bid_id` | 생성 | `f"{bid_ntce_no}_{bid_ntce_ord}"`. 둘 중 하나라도 없으면 `None` |
 | `bid_category` | 주입 | 수집기가 조회한 업무구분(오퍼레이션) 키를 `to_curated(record, bid_category, ...)`로 전달 |
-| `raw_s3_key` | 주입 | 이 레코드의 원본 JSON이 저장된 S3 객체 키. 수집기가 `to_curated(record, ..., raw_s3_key)`로 전달. daily는 레코드별 키, backfill은 일자+업무구분 묶음 배열 파일의 키 |
+| `raw_s3_key` | 주입 | 이 레코드의 원본 JSON이 저장된 S3 객체 키. 수집기가 `to_curated(record, ..., raw_s3_key)`로 전달. daily와 backfill 모두 공고 1건 단위 원본 JSON 키를 넣는다 |
 | `expected_file_count` | 계산 | `len(attachments)` — 다운로드 단계가 실제 적재 수와 대조하는 기대치 |
 
 > `bid_category`·`raw_s3_key`는 수집 스크립트(`raw_json_daily.py`, `raw_json_backfill.py`)의
