@@ -2,4 +2,4 @@
 lxml
 pyhwp   # hwp5proc 바이너리 제공 — extract_hwp가 subprocess로 호출
 
-# TODO: pdf.py 확정 후 pymupdf 추가
+pymupdf   # pdf.py가 parsing.pdf.pdf_extractor 재사용 + 스캔본 감지
