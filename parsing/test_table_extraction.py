@@ -5,7 +5,7 @@
 """
 from pathlib import Path
 
-from parsing.text_extractor import extract_text
+from parsing.pdf_extractor import extract_text
 
 SAMPLE_PDF = (
     Path(__file__).parent.parent / "data" / "sample"

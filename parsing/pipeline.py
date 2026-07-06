@@ -5,9 +5,9 @@ from pathlib import Path
 
 import fitz
 
-from parsing.extractor import extract_qualifications
-from parsing.image_describer import describe_image
-from parsing.text_extractor import extract_text
+from parsing.qualification_extractor import extract_qualifications
+from parsing.pdf_image_describer import describe_image
+from parsing.pdf_extractor import extract_text
 
 
 def run(pdf_path: str) -> dict:

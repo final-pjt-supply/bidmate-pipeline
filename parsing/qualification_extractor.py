@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     txt_path = sys.argv[1] if len(sys.argv) > 1 else None
     if not txt_path:
-        print("사용법: python -m parsing.extractor <텍스트파일경로>")
+        print("사용법: python -m parsing.qualification_extractor <텍스트파일경로>")
         sys.exit(1)
 
     text = Path(txt_path).read_text(encoding="utf-8")
