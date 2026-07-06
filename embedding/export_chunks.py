@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from parsing.chunker import chunk
+from embedding.chunker import chunk
 
 txt_dir = Path(__file__).parent.parent / "data" / "sample" / "output" / "txt"
 out_path = Path(__file__).parent / "chunks.json"

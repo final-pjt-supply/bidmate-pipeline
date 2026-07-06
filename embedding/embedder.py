@@ -45,7 +45,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from parsing.chunker import chunk
+    from embedding.chunker import chunk
 
     txt_dir = Path(__file__).parent.parent / "data" / "sample" / "output" / "txt"
     txt_files = sorted(txt_dir.glob("*.txt"))

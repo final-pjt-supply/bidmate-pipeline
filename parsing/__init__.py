@@ -1,33 +1,8 @@
 # -*- coding: utf-8 -*-
-"""파일 형식을 보고 알맞은 추출기로 라우팅."""
-import os
-
-from parsing.contract import ExtractResult
-from parsing.hwp_hwpx.hwp_extractor import extract_hwp, extract_hwp_file
-from parsing.hwp_hwpx.hwpx_extractor import extract_hwpx, extract_hwpx_file
+"""패키지 공개 API. 실제 라우팅 로직은 parsing.hwp_hwpx가 갖고 있고, 여기서는 재노출만 한다."""
+from parsing.hwp_hwpx import extract, extract_bytes, to_txt
+from parsing.hwp_hwpx.contract import ExtractResult
 
 __all__ = [
     "extract", "extract_bytes", "to_txt", "ExtractResult",
 ]
-
-
-def extract(path: str, describe_fn=None) -> ExtractResult:
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".hwpx":
-        return extract_hwpx_file(path, describe_fn=describe_fn)
-    if ext == ".hwp":
-        return extract_hwp_file(path, describe_fn=describe_fn)
-    raise ValueError(f"지원하지 않는 형식: {ext}")
-
-
-def extract_bytes(data: bytes, filename: str, describe_fn=None) -> ExtractResult:
-    ext = os.path.splitext(filename)[1].lower()
-    if ext == ".hwpx":
-        return extract_hwpx(data, describe_fn=describe_fn)
-    if ext == ".hwp":
-        return extract_hwp(data, describe_fn=describe_fn)
-    raise ValueError(f"지원하지 않는 형식: {ext}")
-
-
-def to_txt(result: ExtractResult) -> str:
-    return result["text"]

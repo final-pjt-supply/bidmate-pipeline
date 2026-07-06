@@ -7,7 +7,7 @@
 """
 import re
 
-from parsing.contract import TABLE_OPEN, TABLE_CLOSE, ExtractResult
+from parsing.hwp_hwpx.contract import TABLE_OPEN, TABLE_CLOSE, ExtractResult
 
 
 def paginate(text: str, max_chars: int = 1000) -> list[str]:
