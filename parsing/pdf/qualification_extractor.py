@@ -120,7 +120,7 @@ def _remove_appendices(text: str) -> str:
 
 
 def _load_config() -> dict:
-    env_path = Path(__file__).parent.parent / ".env"
+    env_path = Path(__file__).parent.parent.parent / ".env"
     config = {}
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     txt_path = sys.argv[1] if len(sys.argv) > 1 else None
     if not txt_path:
-        print("사용법: python -m pipeline.qualification_extractor <텍스트파일경로>")
+        print("사용법: python -m parsing.pdf.qualification_extractor <텍스트파일경로>")
         sys.exit(1)
 
     text = Path(txt_path).read_text(encoding="utf-8")
