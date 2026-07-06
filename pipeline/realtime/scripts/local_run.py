@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))  # repo 루트 (parsing 패키지용)
 
 from extractors import hwp, hwpx, pdf  # noqa: E402
 

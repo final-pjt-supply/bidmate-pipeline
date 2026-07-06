@@ -1,1 +1,5 @@
-# TODO: 추출기별 의존성 확정 후 채우기 (예: pymupdf — extractors/pdf.py)
+# hwp.py / hwpx.py가 parsing.hwp_hwpx를 재사용 (repo 최상위 requirement.txt와 버전 맞출 것)
+lxml
+pyhwp   # hwp5proc 바이너리 제공 — extract_hwp가 subprocess로 호출
+
+# TODO: pdf.py 확정 후 pymupdf 추가

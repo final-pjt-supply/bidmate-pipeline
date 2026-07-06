@@ -7,4 +7,6 @@ from typing import TypedDict
 
 
 class ExtractResult(TypedDict):
-    pass  # TODO: 필드 확정 (예: text, pages, images 등)
+    source_type: str   # "pdf" | "hwp" | "hwpx"
+    text: str          # 본문 (표/이미지 마커 포함)
+    images: dict        # img_id -> 위치/참조 정보
