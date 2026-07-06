@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """추출 결과를 페이지 분할 JSON으로 변환하는 출력 포맷 로직.
 
-- paginate: 본문을 10000자 단위로 분할(줄 경계, [표]…[/표]는 미분할).
+- paginate: 본문을 1000자 단위로 분할(줄 경계, [표]…[/표]는 미분할).
 - to_json_doc: 추출 결과를 페이지 분할 JSON 스키마 dict로 변환.
 - parse_doc_filename: 파일명에서 bid_ntce_no·document_id 파싱.
 """
@@ -10,7 +10,7 @@ import re
 from parsing.contract import TABLE_OPEN, TABLE_CLOSE, ExtractResult
 
 
-def paginate(text: str, max_chars: int = 10000) -> list[str]:
+def paginate(text: str, max_chars: int = 1000) -> list[str]:
     """본문을 max_chars 글자 단위로 페이지 분할한다.
 
     - 줄 경계에서만 자른다(줄 중간 분할 없음).
@@ -47,7 +47,7 @@ def to_json_doc(
     result: ExtractResult,
     bid_ntce_no: str,
     document_id: str,
-    max_chars: int = 10000,
+    max_chars: int = 1000,
 ) -> dict:
     """추출 결과를 페이지 분할 JSON 스키마 dict로 변환한다.
 
