@@ -169,7 +169,7 @@ python3 -m venv .venv
 .venv/bin/python3 -m pip install -r requirement.txt
 ```
 
-`.env` 파일 또는 환경변수:
+`.env` 파일 또는 환경변수 (`cp env.example .env` 후 값을 채우면 된다):
 
 ```bash
 G2B_SERVICE_KEY=<data.go.kr 디코딩 서비스키>   # 필수
