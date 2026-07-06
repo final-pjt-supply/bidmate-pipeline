@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from parsing.json_output import paginate
+from parsing.hwp_hwpx.json_output import paginate
 
 
 def test_short_text_is_single_page():
@@ -35,7 +35,7 @@ def test_table_longer_than_limit_stays_whole():
     assert pages[0].endswith("[/표]")
 
 
-from parsing.json_output import to_json_doc
+from parsing.hwp_hwpx.json_output import to_json_doc
 
 
 def _fake_result(text):
@@ -58,7 +58,7 @@ def test_to_json_doc_empty_text_has_no_pages():
     assert doc["pages"] == []
 
 
-from parsing.json_output import parse_doc_filename
+from parsing.hwp_hwpx.json_output import parse_doc_filename
 
 
 def test_parse_doc_filename_ok():

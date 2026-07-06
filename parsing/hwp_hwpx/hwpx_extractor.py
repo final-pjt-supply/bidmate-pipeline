@@ -11,8 +11,8 @@ import zipfile
 
 from lxml import etree
 
-from parsing.contract import ExtractResult
-from parsing.common import register_image, format_table, normalize_text
+from parsing.hwp_hwpx.contract import ExtractResult
+from parsing.hwp_hwpx.common import register_image, format_table, normalize_text
 
 HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 HC = "{http://www.hancom.co.kr/hwpml/2011/core}"

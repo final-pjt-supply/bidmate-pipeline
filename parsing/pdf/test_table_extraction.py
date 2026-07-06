@@ -5,10 +5,10 @@
 """
 from pathlib import Path
 
-from parsing.text_extractor import extract_text
+from parsing.pdf.pdf_extractor import extract_text
 
 SAMPLE_PDF = (
-    Path(__file__).parent.parent / "data" / "sample"
+    Path(__file__).parent.parent.parent / "data" / "sample"
     / "(공고서변환) 폴리스짐 체육관 바닥개선 공사.pdf"
 )
 

@@ -7,7 +7,7 @@
 """
 import re
 
-from parsing.contract import TABLE_OPEN, TABLE_CLOSE, image_placeholder
+from parsing.hwp_hwpx.contract import TABLE_OPEN, TABLE_CLOSE, image_placeholder
 
 
 def register_image(ctx: dict, source_type: str, ref) -> str:
