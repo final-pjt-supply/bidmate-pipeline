@@ -76,7 +76,19 @@ def split_ext(file_name: Any) -> tuple[str, str]:
 
 
 def apply_dedup(files: list) -> list:
-    """Keep only the best hwpx/hwp/pdf variant for files with the same stem."""
+    """중복 첨부를 걸러내고, 남은 첨부에 공고 내 순번(docNo)을 부여한다.
+
+    두 가지 중복을 제거한다:
+    1. 동일 URL: 나라장터는 표준공고서(stdNtceDocUrl)를 공고첨부와 같은 URL로 내려주는
+       일이 잦다. 같은 URL을 두 번 받으면 파일명 없는 쪽이 _docNN.bin으로 중복 적재되므로,
+       앞선 첨부에서 이미 본 URL은 제외한다. (schema.py에서 1차로 걸러지지만, 이미 S3에
+       적재된 기존 curated JSON을 처리할 때를 대비한 방어선)
+    2. 같은 이름(stem)의 문서가 hwpx/hwp/pdf 여러 확장자로 게시된 경우: 우선순위
+       hwpx > hwp > pdf로 하나만 남긴다 (pdf는 hwpx/hwp가 없을 때만 적재). 우선순위 밖
+       확장자(zip 등)나 파일명이 없는 첨부는 이 규칙의 대상이 아니다.
+
+    제외된 첨부는 다운로드하지 않되 manifest에는 사유와 함께 남긴다.
+    """
     best = {}
     for meta in files:
         stem, ext = split_ext(meta.get("fileName"))
@@ -85,7 +97,13 @@ def apply_dedup(files: list) -> list:
             best[stem] = min(best.get(stem, pri), pri)
 
     doc_no = 0
+    seen_urls = set()
     for meta in files:
+        url = str(meta.get("fileUrl") or "").strip()
+        if url and url in seen_urls:
+            meta["dedupDropped"] = "같은 URL의 첨부를 이미 적재 (중복 다운로드 방지)"
+            continue
+
         stem, ext = split_ext(meta.get("fileName"))
         if stem and ext in DOC_EXT_PRIORITY and DOC_EXT_PRIORITY.index(ext) > best[stem]:
             meta["dedupDropped"] = (
@@ -93,6 +111,9 @@ def apply_dedup(files: list) -> list:
                 " (우선순위 hwpx > hwp > pdf)"
             )
             continue
+
+        if url:
+            seen_urls.add(url)
         doc_no += 1
         meta["docNo"] = doc_no
     return files

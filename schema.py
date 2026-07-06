@@ -161,14 +161,21 @@ def _shre_rate_list(record):
 
 def _attachments(record):
     attachments = []
+    spec_urls = set()
     for index in ATTACHMENT_RANGE:
         file_url = _txt(record.get(f"ntceSpecDocUrl{index}"))
         file_nm = _txt(record.get(f"ntceSpecFileNm{index}"))
         if file_url or file_nm:
             attachments.append({"file_nm": file_nm, "file_url": file_url, "kind": "공고첨부"})
-    # 표준공고서(stdNtceDocUrl)도 다운로드 대상이므로 첨부 배열에 흡수한다.
+            if file_url:
+                spec_urls.add(file_url)
+    # 표준공고서(stdNtceDocUrl)도 다운로드 대상이라 첨부 배열에 흡수하되, 나라장터는
+    # stdNtceDocUrl을 ntceSpecDocUrl 중 하나와 동일한 URL로 내려주는 경우가 대부분이다.
+    # (실측: servc/thng/cnstwk 전 레코드에서 표준공고서 URL이 공고첨부 URL과 100% 동일)
+    # 그대로 두면 같은 파일이 파일명 없는 표준공고서로 한 번 더 다운로드돼 _doc02.bin 등으로
+    # 중복 적재되므로, 공고첨부에 이미 있는 URL이면 표준공고서를 추가하지 않는다.
     std_url = _txt(record.get("stdNtceDocUrl"))
-    if std_url:
+    if std_url and std_url not in spec_urls:
         attachments.append({"file_nm": None, "file_url": std_url, "kind": "표준공고서"})
     return attachments
 
