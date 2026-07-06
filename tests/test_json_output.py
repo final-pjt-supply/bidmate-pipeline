@@ -56,3 +56,22 @@ def test_to_json_doc_shape():
 def test_to_json_doc_empty_text_has_no_pages():
     doc = to_json_doc(_fake_result(""), "n_0", "doc_01")
     assert doc["pages"] == []
+
+
+from parsing.json_output import parse_doc_filename
+
+
+def test_parse_doc_filename_ok():
+    assert parse_doc_filename("202607050001_00_doc_1") == (
+        "202607050001_00",
+        "doc_01",
+    )
+
+
+def test_parse_doc_filename_zero_pads_document_id():
+    assert parse_doc_filename("A123_02_doc_7")[1] == "doc_07"
+
+
+def test_parse_doc_filename_bad_format_returns_none():
+    assert parse_doc_filename("randomfile") is None
+    assert parse_doc_filename("공고_차수_doc_x") is None

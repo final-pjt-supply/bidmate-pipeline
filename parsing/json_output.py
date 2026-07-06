@@ -3,6 +3,8 @@
 
 - paginate: 본문을 10000자 단위로 분할(줄 경계, [표]…[/표]는 미분할).
 """
+import re
+
 from parsing.contract import TABLE_OPEN, TABLE_CLOSE, ExtractResult
 
 
@@ -58,3 +60,20 @@ def to_json_doc(
             for i, page in enumerate(pages, start=1)
         ],
     }
+
+
+_DOC_NAME_RE = re.compile(r"^(?P<no>.+)_(?P<ord>[^_]+)_doc_(?P<n>\d+)$")
+
+
+def parse_doc_filename(stem: str) -> tuple[str, str] | None:
+    """확장자 없는 파일명 '{공고번호}_{차수}_doc_{n}'을 파싱.
+
+    반환: (bid_ntce_no=f"{공고번호}_{차수}", document_id=f"doc_{n:02d}")
+    형식이 맞지 않으면 None.
+    """
+    m = _DOC_NAME_RE.match(stem)
+    if m is None:
+        return None
+    bid_ntce_no = f"{m['no']}_{m['ord']}"
+    document_id = f"doc_{int(m['n']):02d}"
+    return bid_ntce_no, document_id
