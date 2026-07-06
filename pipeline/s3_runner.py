@@ -13,10 +13,10 @@ import boto3
 from dotenv import find_dotenv, load_dotenv
 
 from parsing import extract_bytes
-from parsing.hwp.json_output import parse_doc_filename, to_json_doc
+from parsing.hwp_hwpx.json_output import parse_doc_filename, to_json_doc
 
 # 이미지 캡션은 현재 파이프라인에서 연결 해제 상태(위치 placeholder만 추출).
-# 재연결하려면 parsing.hwp.hwp_image_describer.make_describer()로 describe_fn을 만들어
+# 재연결하려면 parsing.hwp_hwpx.hwp_image_describer.make_describer()로 describe_fn을 만들어
 # extract_bytes(..., describe_fn=describe_fn)로 넘기면 된다.
 
 

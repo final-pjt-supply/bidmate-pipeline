@@ -105,11 +105,11 @@ def make_describer(api_key: str | None = None, query: str = DEFAULT_QUERY):
 
 
 if __name__ == "__main__":
-    # 수동 확인: python -m parsing.hwp.hwp_image_describer <이미지경로>
+    # 수동 확인: python -m parsing.hwp_hwpx.hwp_image_describer <이미지경로>
     import sys
 
     if len(sys.argv) < 2:
-        print("usage: python -m parsing.hwp.hwp_image_describer <image_path>")
+        print("usage: python -m parsing.hwp_hwpx.hwp_image_describer <image_path>")
         raise SystemExit(1)
     desc = make_describer()
     with open(sys.argv[1], "rb") as f:

@@ -3,8 +3,8 @@
 import os
 
 from parsing.contract import ExtractResult
-from parsing.hwp.hwp_extractor import extract_hwp, extract_hwp_file
-from parsing.hwp.hwpx_extractor import extract_hwpx, extract_hwpx_file
+from parsing.hwp_hwpx.hwp_extractor import extract_hwp, extract_hwp_file
+from parsing.hwp_hwpx.hwpx_extractor import extract_hwpx, extract_hwpx_file
 
 __all__ = [
     "extract", "extract_bytes", "to_txt", "ExtractResult",
