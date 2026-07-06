@@ -6,3 +6,4 @@ pyhwp
 pymupdf
 requests
 Pillow
+pytest
