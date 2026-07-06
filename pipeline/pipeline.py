@@ -5,7 +5,7 @@ from pathlib import Path
 
 import fitz
 
-from parsing.qualification_extractor import extract_qualifications
+from pipeline.qualification_extractor import extract_qualifications
 from parsing.pdf.pdf_image_describer import describe_image
 from parsing.pdf.pdf_extractor import extract_text
 
@@ -70,7 +70,7 @@ def _save(pages: dict, output_path: str) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sample_dir = Path(__file__).parent.parent.parent / "data" / "sample"
+        sample_dir = Path(__file__).parent.parent / "data" / "sample"
         for pdf_file in sample_dir.glob("*.pdf"):
             print(f"\n=== {pdf_file.name} ===")
             run(str(pdf_file))

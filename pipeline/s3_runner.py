@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import boto3
 from dotenv import find_dotenv, load_dotenv
 
-from parsing import extract_bytes
+from parsing.hwp_hwpx import extract_bytes
 from parsing.hwp_hwpx.json_output import parse_doc_filename, to_json_doc
 
 # 이미지 캡션은 현재 파이프라인에서 연결 해제 상태(위치 placeholder만 추출).
