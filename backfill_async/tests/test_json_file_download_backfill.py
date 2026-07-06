@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from datetime import datetime
 
@@ -234,6 +235,58 @@ class TestRunFailureIsolation(unittest.IsolatedAsyncioTestCase):
         failures = [r for r in results if isinstance(r, Exception)]
         self.assertEqual(len(successes), 2)
         self.assertEqual(len(failures), 1)
+
+
+class FakeS3PutObject:
+    def __init__(self):
+        self.puts = []  # (key, body_dict)
+
+    async def put_object(self, Bucket, Key, Body, ContentType):
+        self.puts.append((Key, json.loads(Body.decode("utf-8"))))
+
+
+class TestPutManifest(unittest.IsolatedAsyncioTestCase):
+    async def test_groups_entries_by_own_notice_month(self):
+        s3 = FakeS3PutObject()
+        metadata = [
+            {"bidNtceNo": "1", "fileSeq": "1", "bidNtceDt": "2026-01-15 09:00:00"},
+            {"bidNtceNo": "2", "fileSeq": "1", "bidNtceDt": "2026-01-28 09:00:00"},
+            {"bidNtceNo": "3", "fileSeq": "1", "bidNtceDt": "2026-02-03 09:00:00"},
+        ]
+
+        keys = await jfd.put_manifest(s3, "bidmate", metadata, datetime(2026, 7, 5))
+
+        self.assertEqual(set(keys), {
+            "raw/downloads/backfill/year=2026/month=01/manifest.json",
+            "raw/downloads/backfill/year=2026/month=02/manifest.json",
+        })
+
+        by_key = dict(s3.puts)
+        jan_entries = by_key["raw/downloads/backfill/year=2026/month=01/manifest.json"]
+        self.assertEqual({e["bidNtceNo"] for e in jan_entries}, {"1", "2"})
+        feb_entries = by_key["raw/downloads/backfill/year=2026/month=02/manifest.json"]
+        self.assertEqual({e["bidNtceNo"] for e in feb_entries}, {"3"})
+
+    async def test_missing_bid_ntce_dt_falls_back_to_run_month(self):
+        s3 = FakeS3PutObject()
+        metadata = [{"bidNtceNo": "1", "fileSeq": "1"}]
+
+        keys = await jfd.put_manifest(s3, "bidmate", metadata, datetime(2026, 7, 5))
+
+        self.assertEqual(keys, ["raw/downloads/backfill/year=2026/month=07/manifest.json"])
+
+    async def test_rerun_overwrites_same_month_manifest(self):
+        s3 = FakeS3PutObject()
+        first = [{"bidNtceNo": "1", "fileSeq": "1", "bidNtceDt": "2026-06-01 09:00:00"}]
+        second = [{"bidNtceNo": "2", "fileSeq": "1", "bidNtceDt": "2026-06-15 09:00:00"}]
+
+        await jfd.put_manifest(s3, "bidmate", first, datetime(2026, 7, 5))
+        await jfd.put_manifest(s3, "bidmate", second, datetime(2026, 7, 5))
+
+        june_puts = [body for key, body in s3.puts if key == "raw/downloads/backfill/year=2026/month=06/manifest.json"]
+        self.assertEqual(len(june_puts), 2)
+        # 두 번째 실행분만 남아있어야 한다 (병합이 아니라 덮어쓰기)
+        self.assertEqual({e["bidNtceNo"] for e in june_puts[-1]}, {"2"})
 
 
 if __name__ == "__main__":

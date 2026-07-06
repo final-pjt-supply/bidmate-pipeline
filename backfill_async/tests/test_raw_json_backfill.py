@@ -39,14 +39,20 @@ class TestGroupByDay(unittest.TestCase):
         self.assertEqual(set(groups.keys()), {datetime(2026, 6, 3)})
 
 
-class TestIsExactInstitution(unittest.TestCase):
+class TestIsInstitutionMatch(unittest.TestCase):
     def test_matches_exact_name(self):
         record = {"ntceInsttNm": "조달청"}
-        self.assertTrue(rjb.is_exact_institution(record, "조달청"))
+        self.assertTrue(rjb.is_institution_match(record, "조달청"))
 
-    def test_rejects_partial_match(self):
-        record = {"ntceInsttNm": "조달청 서울지방조달청"}
-        self.assertFalse(rjb.is_exact_institution(record, "조달청"))
+    def test_matches_regional_branch_of_same_institution(self):
+        # 한국전력공사처럼 지역본부/사업본부 명의로 공고가 올라오는 기관은
+        # 완전일치로는 걸러지므로, 접두일치로 하위 조직까지 포함해야 한다.
+        record = {"ntceInsttNm": "한국전력공사 강원지역본부"}
+        self.assertTrue(rjb.is_institution_match(record, "한국전력공사"))
+
+    def test_rejects_unrelated_institution(self):
+        record = {"ntceInsttNm": "국방부 국군재정관리단"}
+        self.assertFalse(rjb.is_institution_match(record, "한국전력공사"))
 
 
 class TestToDay(unittest.TestCase):

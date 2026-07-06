@@ -59,9 +59,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("g2b-backfill-async")
 
 
-def is_exact_institution(record, ntce_instt_nm):
-    """ntceInsttNm 파라미터는 부분일치라 조회 대상 기관명과 완전일치하는 레코드만 남긴다."""
-    return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
+def is_institution_match(record, ntce_instt_nm):
+    """ntceInsttNm 파라미터는 부분일치라, 응답에서 조회 기관명으로 시작하는 레코드만 남긴다.
+
+    완전일치가 아니라 접두일치를 쓰는 이유: 한국전력공사/한국수력원자력 같은 기관은
+    실제 공고가 본사 명의가 아니라 "한국전력공사 강원지역본부"처럼 지역본부·사업본부
+    명의로 올라온다. 완전일치로는 이런 하위 조직 공고가 전부 걸러져 거의 0건으로
+    수렴했다 (실측: 한국전력공사 완전일치 시 6개월치 4건). 접두일치로 바꾸면 조회
+    기관명의 하위 조직까지 자동으로 포함된다.
+    """
+    return (record.get("ntceInsttNm") or "").strip().startswith(ntce_instt_nm)
 
 
 def notice_day(record, fallback_dt):
@@ -229,7 +236,7 @@ async def process_day(client, sem, counter, day):
 
     by_operation = {}
     for op_key, inst, record in raw_hits:
-        if is_exact_institution(record, inst):
+        if is_institution_match(record, inst):
             by_operation.setdefault(op_key, []).append(record)
 
     return by_operation, failures

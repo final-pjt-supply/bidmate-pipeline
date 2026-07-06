@@ -36,7 +36,6 @@ except ModuleNotFoundError:
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 CURATED_PREFIX = "raw/curated/backfill"
 FILES_PREFIX = "raw/downloads/backfill"
-METADATA_PREFIX = f"{FILES_PREFIX}/_metadata"
 DEFAULT_CONCURRENCY = 8
 SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
 
@@ -201,18 +200,32 @@ def s3_session():
     return aioboto3.Session()
 
 
-async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> str:
-    key = (
-        f"{METADATA_PREFIX}/year={run_dt:%Y}/month={run_dt:%m}/day={run_dt:%d}/"
-        f"bid_files_backfill_{run_dt:%Y%m%d%H%M%S}.json"
-    )
-    await s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
-        ContentType="application/json; charset=utf-8",
-    )
-    return key
+async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> list:
+    """다운로드 메타데이터를 각 공고의 bidNtceDt 기준 연/월로 묶어
+    downloads/year=Y/month=M/manifest.json에 저장한다.
+
+    실행 시각(run_dt)이 아니라 공고 자체의 날짜로 묶는 이유: 백필은 실행일과
+    수집 대상 기간이 다른 게 정상이라, 실행일 기준으로 쌓으면 어떤 데이터를
+    처리한 매니페스트인지 헷갈린다. bidNtceDt가 없으면 run_dt로 대체한다.
+    같은 월을 여러 번 나눠 실행하면 이번 실행분으로 그 달의 manifest.json
+    전체가 교체된다(병합 아님).
+    """
+    by_month = {}
+    for item in metadata:
+        notice_dt = parse_dt(item.get("bidNtceDt")) or run_dt
+        by_month.setdefault((notice_dt.year, notice_dt.month), []).append(item)
+
+    keys = []
+    for (year, month), items in by_month.items():
+        key = f"{FILES_PREFIX}/year={year:04d}/month={month:02d}/manifest.json"
+        await s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8"),
+            ContentType="application/json; charset=utf-8",
+        )
+        keys.append(key)
+    return keys
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -268,9 +281,10 @@ async def run(args: argparse.Namespace) -> None:
                 skipped += 1
                 print(f"[건너뜀] {label}: {result['downloadError']}")
 
-        manifest_key = await put_manifest(s3, args.bucket, metadata, run_dt)
+        manifest_keys = await put_manifest(s3, args.bucket, metadata, run_dt)
 
-    print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
+    for manifest_key in manifest_keys:
+        print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
     print(f"[완료] 다운로드 성공={success}건, 실패={failed}건, 건너뜀={skipped}건")
 
 
