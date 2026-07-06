@@ -1,4 +1,4 @@
-"""S3 curated JSON에서 첨부문서 URL을 읽고 파일을 S3에 저장한다 (지정 기간 백필).
+"""S3 curated JSON에서 첨부문서 URL을 읽고 파일을 S3에 저장한다 (비동기, 지정 기간 백필).
 
 기본 입력/출력:
 - s3://bidmate/raw/curated/backfill/
@@ -9,6 +9,8 @@
 """
 
 import argparse
+import asyncio
+import io
 import json
 import mimetypes
 import os
@@ -17,7 +19,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
+import httpx
 
 from schema import parse_dt
 
@@ -30,17 +32,8 @@ except ModuleNotFoundError:
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 CURATED_PREFIX = "raw/curated/backfill"
 FILES_PREFIX = "raw/downloads/backfill"
-METADATA_PREFIX = f"{FILES_PREFIX}/_metadata"
-CHUNK_SIZE = 1024 * 256
+DEFAULT_CONCURRENCY = 8
 SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
-
-
-def s3_client():
-    try:
-        import boto3
-    except ImportError as exc:
-        raise SystemExit("S3 사용을 위해 boto3 설치가 필요합니다. 예: pip install boto3") from exc
-    return boto3.client("s3")
 
 
 def safe_key_part(value: Any, fallback: str) -> str:
@@ -68,22 +61,23 @@ def date_prefixes(prefix: str, start_day: datetime, end_day: datetime):
         day += timedelta(days=1)
 
 
-def iter_curated_range(s3, bucket: str, prefix: str, start_day: datetime, end_day: datetime):
+async def iter_curated_range(s3, bucket: str, prefix: str, start_day: datetime, end_day: datetime):
     paginator = s3.get_paginator("list_objects_v2")
     for day_prefix in date_prefixes(prefix, start_day, end_day):
-        for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
+        async for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 if not key.endswith(".json"):
                     continue
-                payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+                response = await s3.get_object(Bucket=bucket, Key=key)
+                payload = await response["Body"].read()
                 record = json.loads(payload.decode("utf-8"))
                 for item in record if isinstance(record, list) else [record]:
                     if isinstance(item, dict):
                         yield key, item
 
 
-def build_file_metadata(bucket: str, record: dict[str, Any], src_key: str, extracted_at: str):
+def build_file_metadata(bucket: str, record: dict, src_key: str, extracted_at: str):
     notice_id = f"{record.get('bid_ntce_no') or 'no-bid-no'}-{record.get('bid_ntce_ord') or '000'}"
     base = {
         "noticeId": notice_id,
@@ -133,13 +127,7 @@ def file_stem(file_name: Any, fallback: str) -> str:
     return name.rsplit(".", 1)[0] if "." in name else name
 
 
-def file_s3_key(
-    prefix: str,
-    metadata: dict[str, Any],
-    content_type: str,
-    file_url: str,
-    used_keys: set[str] | None = None,
-):
+def file_s3_key(prefix, metadata, content_type, file_url, used_keys=None):
     notice_dt = parse_dt(metadata.get("bidNtceDt")) or datetime.now()
     biz_div = safe_key_part(metadata.get("업무구분"), "미분류")
     bid_no = safe_key_part(metadata.get("bidNtceNo") or metadata.get("noticeId"), "공고번호없음")
@@ -165,14 +153,7 @@ def file_s3_key(
     return key
 
 
-def upload_attachment(
-    s3,
-    bucket: str,
-    session: requests.Session,
-    metadata: dict[str, Any],
-    timeout: int,
-    used_keys: set[str],
-):
+async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int, used_keys: set):
     file_url = str(metadata.get("fileUrl") or "").strip()
     if not file_url:
         return {
@@ -183,22 +164,23 @@ def upload_attachment(
             "downloadError": "fileUrl이 비어 있습니다.",
         }
 
-    response = session.get(file_url, stream=True, timeout=timeout)
+    response = await client.get(file_url, timeout=timeout)
     response.raise_for_status()
-    response.raw.decode_content = True
 
     content_type = response.headers.get("Content-Type", "")
     key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url, used_keys)
     extra_args = {"ContentType": content_type} if content_type else None
+
+    body = io.BytesIO(response.content)
     if extra_args:
-        s3.upload_fileobj(response.raw, bucket, key, ExtraArgs=extra_args)
+        await s3.upload_fileobj(body, bucket, key, ExtraArgs=extra_args)
     else:
-        s3.upload_fileobj(response.raw, bucket, key)
+        await s3.upload_fileobj(body, bucket, key)
 
     return {
         "downloadStatus": "success",
         "downloadPath": f"s3://{bucket}/{key}",
-        "downloadSize": int(response.headers.get("Content-Length") or 0),
+        "downloadSize": len(response.content),
         "contentType": content_type,
         "downloadError": "",
         "s3Bucket": bucket,
@@ -206,49 +188,74 @@ def upload_attachment(
     }
 
 
-def put_manifest(s3, bucket: str, metadata: list[dict[str, Any]], run_dt: datetime):
-    key = (
-        f"{METADATA_PREFIX}/year={run_dt:%Y}/month={run_dt:%m}/day={run_dt:%d}/"
-        f"bid_files_backfill_{run_dt:%Y%m%d%H%M%S}.json"
-    )
-    s3.put_object(
-        Bucket=bucket,
-        Key=key,
-        Body=json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
-        ContentType="application/json; charset=utf-8",
-    )
-    return key
+def s3_session():
+    try:
+        import aioboto3
+    except ImportError as exc:
+        raise SystemExit("S3 사용을 위해 aioboto3 설치가 필요합니다. 예: pip install aioboto3") from exc
+    return aioboto3.Session()
 
 
-def run(args: argparse.Namespace) -> None:
-    s3 = s3_client()
+async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> list:
+    """다운로드 메타데이터를 각 공고의 bidNtceDt 기준 연/월로 묶어
+    downloads/year=Y/month=M/manifest.json에 저장한다.
+
+    실행 시각(run_dt)이 아니라 공고 자체의 날짜로 묶는 이유: 백필은 실행일과
+    수집 대상 기간이 다른 게 정상이라, 실행일 기준으로 쌓으면 어떤 데이터를
+    처리한 매니페스트인지 헷갈린다. bidNtceDt가 없으면 run_dt로 대체한다.
+    같은 월을 여러 번 나눠 실행하면 이번 실행분으로 그 달의 manifest.json
+    전체가 교체된다(병합 아님).
+    """
+    by_month = {}
+    for item in metadata:
+        notice_dt = parse_dt(item.get("bidNtceDt")) or run_dt
+        by_month.setdefault((notice_dt.year, notice_dt.month), []).append(item)
+
+    keys = []
+    for (year, month), items in by_month.items():
+        key = f"{FILES_PREFIX}/year={year:04d}/month={month:02d}/manifest.json"
+        await s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8"),
+            ContentType="application/json; charset=utf-8",
+        )
+        keys.append(key)
+    return keys
+
+
+async def run(args: argparse.Namespace) -> None:
+    session = s3_session()
     run_dt = datetime.now()
     extracted_at = run_dt.isoformat()
+    sem = asyncio.Semaphore(args.concurrency)
 
-    metadata = []
-    curated_count = 0
-    for src_key, record in iter_curated_range(s3, args.bucket, args.curated_prefix, args.start, args.end):
-        curated_count += 1
-        metadata.extend(build_file_metadata(args.bucket, record, src_key, extracted_at))
+    async with session.client("s3") as s3:
+        metadata = []
+        curated_count = 0
+        async for src_key, record in iter_curated_range(s3, args.bucket, args.curated_prefix, args.start, args.end):
+            curated_count += 1
+            metadata.extend(build_file_metadata(args.bucket, record, src_key, extracted_at))
 
-    print(f"[시작] {args.start:%Y-%m-%d} ~ {args.end:%Y-%m-%d} curated JSON={curated_count}건")
-    print(f"[추출] 첨부문서 메타데이터={len(metadata)}건")
+        print(f"[시작] {args.start:%Y-%m-%d} ~ {args.end:%Y-%m-%d} curated JSON={curated_count}건")
+        print(f"[추출] 첨부문서 메타데이터={len(metadata)}건")
 
-    success = failed = skipped = 0
-    used_keys: set[str] = set()
-    with requests.Session() as session:
-        for file_meta in metadata:
+        used_keys: set = set()
+
+        async def bound_download(client, file_meta):
+            async with sem:
+                return await upload_attachment(s3, args.bucket, client, file_meta, args.timeout, used_keys)
+
+        async with httpx.AsyncClient() as client:
+            results = await asyncio.gather(
+                *(bound_download(client, file_meta) for file_meta in metadata),
+                return_exceptions=True,
+            )
+
+        success = failed = skipped = 0
+        for file_meta, result in zip(metadata, results):
             label = f"{file_meta.get('bidNtceNo')}/{file_meta.get('fileSeq')}"
-            try:
-                result = upload_attachment(s3, args.bucket, session, file_meta, args.timeout, used_keys)
-                file_meta.update(result)
-                if result["downloadStatus"] == "success":
-                    success += 1
-                    print(f"[성공] {label} -> {result['downloadPath']}")
-                else:
-                    skipped += 1
-                    print(f"[건너뜀] {label}: {result['downloadError']}")
-            except Exception as exc:
+            if isinstance(result, Exception):
                 failed += 1
                 file_meta.update(
                     {
@@ -256,13 +263,24 @@ def run(args: argparse.Namespace) -> None:
                         "downloadPath": "",
                         "downloadSize": 0,
                         "contentType": "",
-                        "downloadError": str(exc)[:1000],
+                        "downloadError": str(result)[:1000],
                     }
                 )
-                print(f"[실패] {label}: {exc}")
+                print(f"[실패] {label}: {result}")
+                continue
 
-    manifest_key = put_manifest(s3, args.bucket, metadata, run_dt)
-    print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
+            file_meta.update(result)
+            if result["downloadStatus"] == "success":
+                success += 1
+                print(f"[성공] {label} -> {result['downloadPath']}")
+            else:
+                skipped += 1
+                print(f"[건너뜀] {label}: {result['downloadError']}")
+
+        manifest_keys = await put_manifest(s3, args.bucket, metadata, run_dt)
+
+    for manifest_key in manifest_keys:
+        print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
     print(f"[완료] 다운로드 성공={success}건, 실패={failed}건, 건너뜀={skipped}건")
 
 
@@ -285,12 +303,15 @@ def to_day(value):
 
 def parse_args() -> argparse.Namespace:
     today = datetime.now().strftime("%Y-%m-%d")
-    parser = argparse.ArgumentParser(description="S3 curated JSON 첨부문서 백필 다운로드 도구")
+    parser = argparse.ArgumentParser(description="S3 curated JSON 첨부문서 백필 다운로드 도구 (비동기)")
     parser.add_argument("--bucket", default=BUCKET_NAME, help="S3 bucket name")
     parser.add_argument("--curated-prefix", default=CURATED_PREFIX, help="curated JSON S3 prefix")
     parser.add_argument("--start", type=to_day, default=today, help="다운로드 대상 시작일 YYYY-MM-DD (기본: 오늘)")
     parser.add_argument("--end", type=to_day, help="다운로드 대상 종료일 YYYY-MM-DD (기본: --start 와 동일)")
     parser.add_argument("--timeout", type=positive_int, default=60, help="파일 다운로드 제한 시간 초")
+    parser.add_argument(
+        "--concurrency", type=positive_int, default=DEFAULT_CONCURRENCY, help="동시 다운로드 수 제한 (기본: 8)"
+    )
     args = parser.parse_args()
     args.end = args.end or args.start
     if args.start > args.end:
@@ -300,7 +321,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     try:
-        run(parse_args())
+        asyncio.run(run(parse_args()))
     except Exception as exc:
         raise SystemExit(f"실패: {exc}") from None
 

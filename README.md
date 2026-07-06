@@ -39,19 +39,12 @@ bidding-agent/
 │
 ├── raw_json_daily.py                  # [daily]    최근 N분 공고 수집 (동기)
 ├── json_file_download_daily.py        # [daily]    최근 N분 curated의 첨부 다운로드 (동기)
-├── raw_json_backfill.py               # [backfill] 기간 지정 공고 수집 (동기, 레거시)
-├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (동기, 레거시)
+├── raw_json_backfill.py               # [backfill] 기간 지정 공고 수집 (비동기: httpx + aioboto3)
+├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (비동기)
 │
-├── backfill_async/                    # [backfill] 비동기 버전 (httpx + aioboto3) — 현행 권장
-│   ├── raw_json_backfill.py           #   기간 지정 공고 수집: 날짜 단위 순회 + 동시 조회
-│   ├── json_file_download_backfill.py #   첨부 파일 동시 다운로드
-│   └── tests/                         #   pytest-asyncio 기반 테스트
-│
-├── tests/                             # 동기 스크립트 테스트 (unittest 스타일)
-├── docs/superpowers/                  # 설계 스펙·구현 계획 문서
+├── .github/                           # Gemini PR 자동 리뷰 워크플로우
 ├── FIELD_DICTIONARY.md                # curated 39필드 명세 (schema.py와 1:1 동기화)
-├── requirement.txt                    # requests, boto3, httpx, aioboto3, pytest-asyncio 등
-└── pytest.ini                         # asyncio_mode = auto
+└── requirement.txt                    # requests, boto3, httpx, aioboto3 등
 ```
 
 ### 코드 의존성
@@ -66,7 +59,6 @@ bidding-agent/
           ▼                                            ▼
   A. 공고 수집 스크립트                        B. 첨부 다운로드 스크립트
   raw_json_{daily,backfill}.py                json_file_download_{daily,backfill}.py
-  backfill_async/raw_json_backfill.py         backfill_async/json_file_download_backfill.py
           │                                            ▲
           ▼                                            │
    s3://…/raw/raw/        s3://…/raw/curated/ ─────────┘        s3://…/raw/downloads/
@@ -119,22 +111,18 @@ daily 산출물(단건)과 backfill 산출물(배열)을 같은 코드로 처리
 > 물려받은 탓에, 2026년 1월 데이터를 백필했더니 "7월 기준 아직 안 마감된" 극소수
 > 공고만 남는 문제가 있었고, backfill에서는 필터를 제거하는 것으로 확정했다.
 
-### backfill: 동기(레거시) vs 비동기(현행)
+### backfill 구현 특성 (비동기)
 
-backfill은 두 구현이 공존한다. **신규 백필 작업은 `backfill_async/`를 사용한다.**
+backfill 스크립트 2개는 `httpx.AsyncClient` + `aioboto3` 기반 비동기 구현이다.
 
-| | 동기 (루트의 `raw_json_backfill.py`) | 비동기 (`backfill_async/raw_json_backfill.py`) |
-|---|---|---|
-| HTTP / S3 | `requests` / `boto3` | `httpx.AsyncClient` / `aioboto3` |
-| 조회 방식 | 기관×업무구분×페이지 순차 처리 | `asyncio.Semaphore`(기본 8, `--concurrency`)로 동시 조회 |
-| 범위 처리 | `--start`~`--end`를 **한 번의 API 조건**으로 조회 → API의 조회기간 제한(약 1개월)에 걸리면 조용히 0건 (알려진 이슈) | **날짜 단위로 쪼개 순회** → 범위 제한에 원천적으로 안 걸림 |
-| 페이지네이션 | totalCount 확인 후 순차 | 2단계: ① 40개 조합의 1페이지 동시 조회로 totalCount 확보 → ② 남은 페이지 전부를 하나의 동시 배치로 조회 |
-| 실패 처리 | 한 페이지 재시도 소진 시 전체 중단 | **부분 실패 격리**: 성공분은 무조건 S3 저장, 실패 조합만 로그 + exit code 1 |
-| API 에러 응답 감지 | 없음 (0건으로 오인) | `G2BApiError`: 에러 구조 응답을 즉시 실패 처리(재시도 낭비 없음) |
-| 호출 예산 | 없음 | 실행 단위 카운터, 95,000콜 도달 시 날짜 경계에서 조기 종료(exit 0) + 재개 안내 로그 |
-| 마감 공고 필터 | `is_open` 적용 (미수정 레거시) | 제거됨 |
+- **동시성 제어**: `asyncio.Semaphore`(기본 8, `--concurrency`)로 동시 요청 수 제한
+- **날짜 단위 순회**: `--start`~`--end`를 하루씩 쪼개 조회 → API의 조회기간 제한(약 1개월)에 원천적으로 안 걸림
+- **2단계 페이지네이션**: ① 기관 10 × 업무구분 4 = 40개 조합의 1페이지를 동시 조회해 totalCount 확보 → ② 남은 페이지 전부를 하나의 동시 배치로 조회
+- **부분 실패 격리**: 성공분은 무조건 S3 저장, 실패 조합만 로그 + exit code 1
+- **API 에러 응답 감지**: `G2BApiError` — 에러 구조 응답을 즉시 실패 처리(0건 오인·재시도 낭비 없음)
+- **호출 예산**: 실행 단위 카운터, 95,000콜 도달 시 날짜 경계에서 조기 종료(exit 0) + 재개 안내 로그
 
-비동기 버전의 하루 처리 흐름:
+backfill의 하루 처리 흐름:
 
 ```text
 collect_range (날짜 루프)
@@ -198,46 +186,76 @@ AWS_DEFAULT_REGION=...
 python3 raw_json_daily.py
 python3 json_file_download_daily.py
 
-# ── backfill (비동기, 권장) ──
-python3 backfill_async/raw_json_backfill.py --start 2026-01-01 --end 2026-06-30
-python3 backfill_async/json_file_download_backfill.py --start 2026-01-01 --end 2026-06-30
+# ── backfill (비동기, 기간 지정) ──
+python3 raw_json_backfill.py --start 2026-01-01 --end 2026-06-30
+python3 json_file_download_backfill.py --start 2026-01-01 --end 2026-06-30
 
 # 동시성 조절 (기본 8; API 부하·차단 위험과 속도의 트레이드오프)
-python3 backfill_async/raw_json_backfill.py --start 2026-06-01 --concurrency 5
+python3 raw_json_backfill.py --start 2026-06-01 --concurrency 5
 ```
 
-비동기 backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 종료 `0`(재개 안내 로그 출력) /
+backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 종료 `0`(재개 안내 로그 출력) /
 일부 조합 실패 `1`(실패 조합이 로그에 남으므로 해당 범위만 재실행).
-
-### 테스트
-
-```bash
-.venv/bin/python3 -m pytest tests/ backfill_async/   # 동기 + 비동기 전체
-```
-
-비동기 테스트는 `pytest-asyncio`(`pytest.ini`의 `asyncio_mode = auto`) 기반이며,
-httpx/aioboto3를 가짜 클라이언트로 대체해 네트워크 없이 돈다. 재시도, 2단계 조회,
-부분 실패 격리, 호출 예산 조기 종료, API 에러 응답 감지가 모두 테스트로 고정되어 있다.
 
 ## 6. 알려진 이슈 / 주의사항
 
-- **동기 backfill(루트 `raw_json_backfill.py`)의 레거시 이슈 2건** — 비동기 버전에는 수정 반영됨:
-  1. 1개월 초과 범위 요청 시 API 에러를 감지 못 하고 "0건"으로 정상 종료한다.
-  2. daily용 `is_open` 필터가 남아 있어 과거 공고 대부분이 걸러진다.
 - `schema.py`의 `FIELD_MAP`을 수정하면 **`FIELD_DICTIONARY.md`도 반드시 함께 갱신**한다.
 - 이 폴더는 iCloud Drive 동기화 범위 안에 있다. git 오류가 나면 iCloud 간섭을 의심할 것.
 - TOP10 기관 제한은 2026-07-01 멘토 미팅 결정이다(전체 기관 수집은 비현실적 판단).
   대상 변경은 `institutions.py` 한 곳만 수정하면 된다.
 
-## 7. 필드 명세와 설계 문서
+## 7. 필드 명세
 
 - curated 39필드 정의와 원본 113필드 처분 근거: [FIELD_DICTIONARY.md](FIELD_DICTIONARY.md)
-- S3 파티션 재설계 스펙: [docs/superpowers/specs/2026-07-04-s3-partition-redesign-design.md](docs/superpowers/specs/2026-07-04-s3-partition-redesign-design.md)
-- 비동기 backfill 설계 스펙: [docs/superpowers/specs/2026-07-05-backfill-async-pipeline-design.md](docs/superpowers/specs/2026-07-05-backfill-async-pipeline-design.md)
 
-## 8. 다음 로드맵
+## 8. 설계 결정 기록
 
-- 동기 backfill 레거시 이슈 수정 또는 비동기 버전으로 일원화
+별도 문서(`docs/superpowers/`)로 관리하던 설계 스펙·구현 계획의 핵심을 이 절에 통합했다.
+"무엇을 하는가"는 위 2~6절에 이미 있으므로, 여기에는 **왜 그렇게 결정했는지**만 남긴다.
+
+### S3 파티션 재설계 (2026-07-04)
+
+- 버킷명 기본값을 `bidding-agent` → `bidmate`로 변경했다 (환경변수 오버라이드 구조는 유지).
+- `raw/raw`, `raw/curated`, `raw/downloads` 세 prefix 모두에 `backfill/`·`daily/` 하위 폴더를
+  도입했다. 쓰는 스크립트와 읽는 스크립트의 대응 관계(daily 수집분은 daily 다운로더만 소비)를
+  경로 구조 자체로 강제하기 위함이다.
+- backfill 저장 단위를 "레코드별 JSON"에서 "하루+업무구분 배열 JSON 1개"로 바꾸면서,
+  레코드 단위 키를 만들던 `notice_id()`/`s3_json_key()`와 그로 인해 미사용이 된
+  `safe_key_part()`/`SAFE_KEY`를 수집 스크립트에서 제거했다.
+- 첨부파일 키는 `notice_id={번호}/{fileSeq}_{파일명}` → `bidNtceNo={번호}_ord={2자리}/{stem}_{kind}{확장자}`
+  구조로 변경했다.
+  - `ord`는 `bidNtceOrd`에서 숫자만 추출해 `zfill(2)` (없으면 `00`).
+  - `stem`은 원본 파일명에서 확장자를 뗀 부분, 원본 파일명이 없는 첨부(표준공고서 등)는 `bidNtceNo`로 대체.
+  - 확장자는 원본 파일명 → HTTP 응답 Content-Type → URL 순으로 추정한다 (`guess_ext`).
+  - 완전히 동일한 키가 같은 실행 안에서 재발생하면 `_2`, `_3` 접미사를 붙인다. 실행 전체에 걸친
+    `used_keys` 집합으로 추적하며, 실제 Content-Type을 확보한 업로드 시점에 최종 키를 확정한다.
+
+### backfill 비동기 파이프라인 (2026-07-05)
+
+- 기존 동기 스크립트와 테스트는 무변경으로 두고, `backfill_async/`에 비동기 버전을 병행 구축했다.
+- HTTP 클라이언트는 `httpx`(requests와 API가 유사하고 sync/async 겸용), S3는 `aioboto3`
+  (S3 호출까지 완전 async로 통일, 이벤트 루프 블로킹 방지)를 채택했다.
+- 두 스크립트 간 공통 로직(재시도, 세마포어, S3 클라이언트 생성)은 공유 모듈로 빼지 않고
+  **각 파일에 중복 작성**했다 — 파일 하나만 열어도 전체 로직이 보이도록 한 의도된 선택이다.
+- `backfill_async/`를 파이썬 패키지(`__init__.py`)로 만든 이유: 동기 버전과 모듈 파일명이
+  같아서(`raw_json_backfill.py`), 패키지 경로 없이 import하면 `sys.modules`에 먼저 캐시된
+  쪽이 재사용되어 다른 쪽 테스트가 엉뚱한 모듈을 검증하는 조용한 버그가 생기기 때문이다.
+- 호출 예산(95,000)은 **상태 파일 없이 실행 단위 카운터**로만 관리한다. 조기 종료 시 로그에
+  안내된 `--start` 날짜로 운영자가 직접 재실행한다(자동 이어받기 없음). 같은 날 여러 번
+  실행하면 합산 한도를 보장하지 못하는 것은 단순함을 택한 의도된 트레이드오프다.
+- 부분 실패 정책: 모든 `asyncio.gather`는 `return_exceptions=True`로 실행하고, 성공분은
+  무조건 S3에 저장한다. 실패가 하나라도 있으면 처리는 계속하되 exit code 1로 종료해
+  운영자가 인지하게 한다. 다운로드는 파일 단위로 실패를 격리하고 manifest에 개별 기록한다.
+
+### 파이프라인 일원화 (2026-07-06)
+
+- 비동기 버전 안정화 후 동기 backfill 2종(레거시 이슈 2건 보유: 1개월 초과 범위를 0건으로
+  오인, daily용 `is_open` 필터 잔존)과 테스트 일체(`tests/`, `backfill_async/tests/`,
+  `pytest.ini`)를 제거하고, 비동기 스크립트를 저장소 루트로 이동해 backfill 구현을
+  일원화했다. 위 "병행 구축"과 "패키지 분리" 항목은 과도기의 결정 기록이다.
+
+## 9. 다음 로드맵
+
 - daily 파이프라인의 비동기 전환 검토
 - Airflow DAG 전환: collect → download → parse → index 자동화
 - OpenSearch 인덱스 설계 + Nori 형태소 분석기 적용
