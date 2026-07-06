@@ -2,7 +2,7 @@
 """
 
 나라장터 입찰공고 백필 수집기 (httpx + aioboto3 비동기 동시 조회).
-raw/curated 이중 저장, year=YYYY/month=MM/day=DD 파티션 구조.
+공고 1건당 raw/curated JSON 1개씩 이중 저장, year=YYYY/month=MM/day=DD 파티션 구조.
 실행 방법
 - 환경변수 G2B_SERVICE_KEY에 디코딩 키를 설정
 - python3 raw_json_backfill.py --start 2026-06-01 --end 2026-06-30
@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 import httpx
@@ -44,6 +45,7 @@ TIMEOUT = 30
 MAX_RETRY = 3
 DEFAULT_CONCURRENCY = 8
 CALL_BUDGET = 95_000
+SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("g2b-backfill-async")
@@ -66,17 +68,22 @@ def notice_day(record, fallback_dt):
     return datetime(notice_dt.year, notice_dt.month, notice_dt.day)
 
 
-def group_by_day(records, now):
-    """필터링된 레코드를 공고일(notice_day) 기준으로 묶는다."""
-    groups = {}
-    for record in records:
-        day = notice_day(record, now)
-        groups.setdefault(day, []).append(record)
-    return groups
+def safe_key_part(value, fallback):
+    cleaned = SAFE_KEY.sub("_", str(value or "").strip())
+    return cleaned[:180] or fallback
 
 
-def s3_day_json_key(prefix, cat, day):
-    return f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/biz_div={cat}.json"
+def notice_id(record, index):
+    bid_no = safe_key_part(record.get("bidNtceNo"), f"no-bid-no-{index}")
+    bid_ord = safe_key_part(record.get("bidNtceOrd"), "000")
+    return f"{bid_no}-{bid_ord}"
+
+
+def s3_notice_json_key(prefix, cat, day, record, index):
+    return (
+        f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        f"biz_div={cat}/{notice_id(record, index)}.json"
+    )
 
 
 def to_day(value):
@@ -253,7 +260,7 @@ async def put_json(s3, bucket, key, payload):
 async def collect_range(start_day, end_day, bucket, concurrency):
     sem = asyncio.Semaphore(concurrency)
     counter = CallCounter()
-    now = datetime.now()
+    fallback_dt = datetime.now()
     had_failure = False
 
     session = s3_session()
@@ -261,21 +268,28 @@ async def collect_range(start_day, end_day, bucket, concurrency):
         day = start_day
         while day <= end_day:
             by_operation, failures = await process_day(client, sem, counter, day)
+            saved_count = 0
 
             for op_key, records in by_operation.items():
-                for notice_day, day_records in group_by_day(records, now).items():
-                    raw_key = s3_day_json_key(RAW_PREFIX, op_key, notice_day)
-                    curated_key = s3_day_json_key(CURATED_PREFIX, op_key, notice_day)
-                    curated_records = [to_curated(record, op_key, raw_key) for record in day_records]
-                    await put_json(s3, bucket, raw_key, day_records)
-                    await put_json(s3, bucket, curated_key, curated_records)
+                for index, record in enumerate(records, start=1):
+                    day_part = notice_day(record, fallback_dt)
+                    raw_key = s3_notice_json_key(RAW_PREFIX, op_key, day_part, record, index)
+                    curated_key = s3_notice_json_key(CURATED_PREFIX, op_key, day_part, record, index)
+                    await put_json(s3, bucket, raw_key, record)
+                    await put_json(s3, bucket, curated_key, to_curated(record, op_key, raw_key))
+                    saved_count += 1
 
             if failures:
                 had_failure = True
                 for op_key, inst, page_no, exc in failures:
                     log.error("[%s] %s/%s p%s 실패: %s", f"{day:%Y-%m-%d}", op_key, inst, page_no, exc)
 
-            log.info("[%s] 처리 완료 (누적 API 호출 %s회)", f"{day:%Y-%m-%d}", counter.count)
+            log.info(
+                "[%s] 처리 완료 (S3 저장 %s건, 누적 API 호출 %s회)",
+                f"{day:%Y-%m-%d}",
+                saved_count,
+                counter.count,
+            )
 
             if counter.count >= CALL_BUDGET:
                 log.warning(
