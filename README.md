@@ -21,7 +21,7 @@ S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실�
 책임 범위는 명확히 두 가지다.
 
 1. **공고 메타데이터 수집** — 조달청 API 응답(원본 113필드)을 S3에 그대로 보존(`raw`)하고,
-   후속 단계가 쓰기 좋은 39필드로 정제(`curated`)해 이중 저장한다.
+   후속 단계가 쓰기 좋은 47필드로 정제(`curated`)해 이중 저장한다.
 2. **첨부문서 실물 적재** — curated가 가리키는 첨부(과업지시서, 제안요청서, 표준공고서 등)를
    다운로드해 S3에 공고 단위로 정리해 넣는다. 이 파일들이 이후 텍스트 추출·임베딩의 원료가 된다.
 
@@ -35,7 +35,7 @@ S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실�
 ```text
 bidding-agent/
 ├── institutions.py                    # 조회 대상 TOP10 기관 목록 (공용 상수)
-├── schema.py                          # 원본 113필드 → curated 39필드 변환 (공용 순수 로직)
+├── schema.py                          # 원본 113필드 → curated 47필드 변환 (공용 순수 로직)
 │
 ├── raw_json_daily.py                  # [daily]    최근 N분 공고 수집 (동기)
 ├── json_file_download_daily.py        # [daily]    최근 N분 curated의 첨부 다운로드 (동기)
@@ -43,7 +43,7 @@ bidding-agent/
 ├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (비동기)
 │
 ├── .github/                           # Gemini PR 자동 리뷰 워크플로우
-├── FIELD_DICTIONARY.md                # curated 39필드 명세 (schema.py와 1:1 동기화)
+├── FIELD_DICTIONARY.md                # curated 47필드 명세 (schema.py와 1:1 동기화)
 └── requirement.txt                    # requests, boto3, httpx, aioboto3 등
 ```
 
@@ -62,7 +62,7 @@ bidding-agent/
           │                                            ▲
           ▼                                            │
    s3://…/raw/raw/        s3://…/raw/curated/ ─────────┘        s3://…/raw/downloads/
-   (원본 113필드)          (정제 39필드 + attachments 배열)       (HWP/PDF 실물 + _metadata)
+   (원본 113필드)          (정제 47필드 + attachments 배열)       (HWP/PDF 실물 + _metadata)
 ```
 
 **데이터 계약**: 다운로드 단계(B)는 raw가 아니라 **curated를 소비**한다.
@@ -75,7 +75,7 @@ bidding-agent/
 
 ```text
 s3://bidmate/raw/raw/{backfill,daily}/        # API 원본 그대로 (113필드)
-s3://bidmate/raw/curated/{backfill,daily}/    # schema.py 변환 결과 (39필드)
+s3://bidmate/raw/curated/{backfill,daily}/    # schema.py 변환 결과 (47필드)
 s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/ (다운로드 manifest)
 ```
 
@@ -87,8 +87,18 @@ s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/
 | | daily | backfill |
 |---|---|---|
 | raw/curated 저장 단위 | 공고 1건 = JSON 1개 (`{bidNtceNo}-{ord}.json`) | 하루+업무구분 = 배열 JSON 1개 (`biz_div={cat}.json`) |
-| 다운로드 폴더 | `bidNtceNo={공고번호}_ord={차수}` 공고 단위 폴더 | 동일 |
-| 파일명 규칙 | `{원본stem}_{공고첨부\|표준공고서}{확장자}`, 중복 시 `_2`, `_3` 접미사 | 동일 |
+| 다운로드 폴더 | `{공고번호}_{차수}` 공고 단위 폴더 | 동일 |
+| 파일명 규칙 | `{공고번호}_{차수}_doc{NN}{확장자}` — 원본 파일명 미사용 | 동일 |
+
+첨부 적재 시 두 가지 규칙이 적용된다:
+
+- **확장자 중복 제거**: 같은 이름의 문서가 hwpx/hwp/pdf 여러 확장자로 함께 게시된 경우
+  우선순위 **hwpx > hwp > pdf**로 하나만 내려받는다 (pdf는 hwpx/hwp가 없을 때만).
+  zip 등 그 외 확장자와 파일명 없는 첨부(표준공고서)는 대상이 아니다.
+- **파일명 익명화**: 남은 첨부에 공고 내 순번 `doc01`, `doc02`…를 부여해
+  `{공고번호}_{차수 2자리}_doc{NN}{확장자}`로 저장한다 (전부 언더바 연결 snake 형식,
+  예: `20260700001_00/20260700001_00_doc01.hwpx`). 원본 파일명·종류(공고첨부/표준공고서)와
+  제외 사유는 manifest(`fileName`, `fileKind`, `downloadError`)에서 추적한다.
 
 다운로드 단계는 curated를 읽을 때 단건 dict와 배열을 모두 지원하므로
 daily 산출물(단건)과 backfill 산출물(배열)을 같은 코드로 처리한다.
@@ -206,7 +216,7 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
 
 ## 7. 필드 명세
 
-- curated 39필드 정의와 원본 113필드 처분 근거: [FIELD_DICTIONARY.md](FIELD_DICTIONARY.md)
+- curated 47필드 정의와 원본 113필드 처분 근거: [FIELD_DICTIONARY.md](FIELD_DICTIONARY.md)
 
 ## 8. 설계 결정 기록
 
@@ -229,6 +239,7 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
   - 확장자는 원본 파일명 → HTTP 응답 Content-Type → URL 순으로 추정한다 (`guess_ext`).
   - 완전히 동일한 키가 같은 실행 안에서 재발생하면 `_2`, `_3` 접미사를 붙인다. 실행 전체에 걸친
     `used_keys` 집합으로 추적하며, 실제 Content-Type을 확보한 업로드 시점에 최종 키를 확정한다.
+  - (파일명과 공고 폴더명은 아래 "첨부 파일명 익명화" 결정으로 대체됨 — 연월일/biz_div 파티션은 그대로 유효)
 
 ### backfill 비동기 파이프라인 (2026-07-05)
 
@@ -246,6 +257,17 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
 - 부분 실패 정책: 모든 `asyncio.gather`는 `return_exceptions=True`로 실행하고, 성공분은
   무조건 S3에 저장한다. 실패가 하나라도 있으면 처리는 계속하되 exit code 1로 종료해
   운영자가 인지하게 한다. 다운로드는 파일 단위로 실패를 격리하고 manifest에 개별 기록한다.
+
+### 첨부 파일명 익명화 + 확장자 중복 제거 (2026-07-06)
+
+- 같은 문서를 hwp와 pdf로 이중 게시하는 공고가 많아, 같은 이름(stem)의 hwpx/hwp/pdf 중
+  우선순위(hwpx > hwp > pdf)가 가장 높은 확장자 하나만 적재하도록 했다. 제외분은
+  다운로드하지 않되 manifest에 사유를 남긴다.
+- 원본 파일명(한글, 특수문자, 길이 편차)을 S3 키에서 제거하고, 공고 폴더와 파일명을
+  언더바 연결 snake 형식 `{공고번호}_{차수}/{공고번호}_{차수}_doc{NN}{확장자}`로 통일했다
+  (docNN은 2자리 제로패딩). 이름이 결정적이 되면서 재실행 시 같은 키에 덮어써
+  멱등해졌고, 기존 `_2`/`_3` 충돌 회피 로직(`used_keys`)은 제거했다.
+  원본 이름과의 매핑은 manifest의 `fileName`으로 보존된다.
 
 ### 파이프라인 일원화 (2026-07-06)
 
