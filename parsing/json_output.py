@@ -3,7 +3,7 @@
 
 - paginate: 본문을 10000자 단위로 분할(줄 경계, [표]…[/표]는 미분할).
 """
-from parsing.contract import TABLE_OPEN, TABLE_CLOSE
+from parsing.contract import TABLE_OPEN, TABLE_CLOSE, ExtractResult
 
 
 def paginate(text: str, max_chars: int = 10000) -> list[str]:
@@ -37,3 +37,24 @@ def paginate(text: str, max_chars: int = 10000) -> list[str]:
     if buf:
         pages.append("\n".join(buf))
     return pages
+
+
+def to_json_doc(
+    result: ExtractResult,
+    bid_ntce_no: str,
+    document_id: str,
+    max_chars: int = 10000,
+) -> dict:
+    """추출 결과를 페이지 분할 JSON 스키마 dict로 변환한다.
+
+    {"bid_ntce_no", "document_id", "pages": [{"page"(1부터), "text"}]}
+    """
+    pages = paginate(result["text"], max_chars)
+    return {
+        "bid_ntce_no": bid_ntce_no,
+        "document_id": document_id,
+        "pages": [
+            {"page": i, "text": page}
+            for i, page in enumerate(pages, start=1)
+        ],
+    }

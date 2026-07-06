@@ -33,3 +33,26 @@ def test_table_longer_than_limit_stays_whole():
     assert len(pages) == 1
     assert pages[0].startswith("[표]")
     assert pages[0].endswith("[/표]")
+
+
+from parsing.json_output import to_json_doc
+
+
+def _fake_result(text):
+    return {"source_type": "hwp", "text": text, "images": {}}
+
+
+def test_to_json_doc_shape():
+    result = _fake_result("aaaa\nbbbb\ncccc\ndddd")
+    doc = to_json_doc(result, "202607050001_00", "doc_01", max_chars=10)
+    assert doc["bid_ntce_no"] == "202607050001_00"
+    assert doc["document_id"] == "doc_01"
+    assert doc["pages"] == [
+        {"page": 1, "text": "aaaa\nbbbb"},
+        {"page": 2, "text": "cccc\ndddd"},
+    ]
+
+
+def test_to_json_doc_empty_text_has_no_pages():
+    doc = to_json_doc(_fake_result(""), "n_0", "doc_01")
+    assert doc["pages"] == []
