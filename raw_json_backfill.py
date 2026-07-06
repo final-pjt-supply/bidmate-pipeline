@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
+
 나라장터 입찰공고 백필 수집기 (httpx + aioboto3 비동기 동시 조회).
-
 raw/curated 이중 저장, year=YYYY/month=MM/day=DD 파티션 구조.
-
 실행 방법
 - 환경변수 G2B_SERVICE_KEY에 디코딩 키를 설정
 - python3 raw_json_backfill.py --start 2026-06-01 --end 2026-06-30
+
 """
 
 import argparse
@@ -16,9 +16,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timedelta
-
 import httpx
-
 from institutions import TOP10_INSTITUTIONS
 from schema import parse_dt, to_curated
 
@@ -268,7 +266,7 @@ async def collect_range(start_day, end_day, bucket, concurrency):
                 for notice_day, day_records in group_by_day(records, now).items():
                     raw_key = s3_day_json_key(RAW_PREFIX, op_key, notice_day)
                     curated_key = s3_day_json_key(CURATED_PREFIX, op_key, notice_day)
-                    curated_records = [to_curated(record, op_key, now) for record in day_records]
+                    curated_records = [to_curated(record, op_key, raw_key) for record in day_records]
                     await put_json(s3, bucket, raw_key, day_records)
                     await put_json(s3, bucket, curated_key, curated_records)
 

@@ -81,7 +81,7 @@ def build_file_metadata(bucket: str, record: dict, src_key: str, extracted_at: s
     notice_id = f"{record.get('bid_ntce_no') or 'no-bid-no'}-{record.get('bid_ntce_ord') or '000'}"
     base = {
         "noticeId": notice_id,
-        "업무구분": record.get("src_biz_div") or "미분류",
+        "업무구분": record.get("bid_category") or "미분류",
         "bidNtceNo": record.get("bid_ntce_no"),
         "bidNtceOrd": record.get("bid_ntce_ord"),
         "bidNtceNm": record.get("bid_ntce_nm"),
@@ -109,6 +109,47 @@ def build_file_metadata(bucket: str, record: dict, src_key: str, extracted_at: s
                     "fileUrl": file_url,
                 }
             )
+    return apply_dedup(files)
+
+
+# 같은 이름의 문서가 여러 확장자로 함께 게시된 경우의 적재 우선순위
+DOC_EXT_PRIORITY = ("hwpx", "hwp", "pdf")
+
+
+def split_ext(file_name: Any) -> tuple[str, str]:
+    name = str(file_name or "").strip()
+    if "." in name:
+        stem, ext = name.rsplit(".", 1)
+        return stem.strip(), ext.strip().lower()
+    return name, ""
+
+
+def apply_dedup(files: list) -> list:
+    """같은 이름(stem)의 문서가 hwpx/hwp/pdf 여러 확장자로 게시된 경우 하나만 남긴다.
+
+    우선순위는 hwpx > hwp > pdf (pdf는 hwpx/hwp가 없을 때만 적재). 우선순위 밖
+    확장자(zip 등)나 파일명이 없는 첨부(표준공고서)는 중복 제거 대상이 아니다.
+    제외된 첨부는 다운로드하지 않되 manifest에는 사유와 함께 남긴다.
+    남은 첨부에는 공고 내 순번(docNo)을 부여한다 — S3 파일명(docN)의 근거.
+    """
+    best = {}
+    for meta in files:
+        stem, ext = split_ext(meta.get("fileName"))
+        if stem and ext in DOC_EXT_PRIORITY:
+            pri = DOC_EXT_PRIORITY.index(ext)
+            best[stem] = min(best.get(stem, pri), pri)
+
+    doc_no = 0
+    for meta in files:
+        stem, ext = split_ext(meta.get("fileName"))
+        if stem and ext in DOC_EXT_PRIORITY and DOC_EXT_PRIORITY.index(ext) > best[stem]:
+            meta["dedupDropped"] = (
+                f"같은 이름의 {DOC_EXT_PRIORITY[best[stem]]} 문서를 우선 적재"
+                " (우선순위 hwpx > hwp > pdf)"
+            )
+            continue
+        doc_no += 1
+        meta["docNo"] = doc_no
     return files
 
 
@@ -120,40 +161,32 @@ def format_ord(value: Any) -> str:
     return match.group(0).zfill(2) if match else "00"
 
 
-def file_stem(file_name: Any, fallback: str) -> str:
-    name = str(file_name or "").strip()
-    if not name:
-        return fallback
-    return name.rsplit(".", 1)[0] if "." in name else name
-
-
-def file_s3_key(prefix, metadata, content_type, file_url, used_keys=None):
+def file_s3_key(prefix, metadata, content_type, file_url):
+    """원본 파일명 대신 {공고번호}_{차수}_doc{NN}{확장자}로 익명화한 키를 만든다."""
     notice_dt = parse_dt(metadata.get("bidNtceDt")) or datetime.now()
     biz_div = safe_key_part(metadata.get("업무구분"), "미분류")
     bid_no = safe_key_part(metadata.get("bidNtceNo") or metadata.get("noticeId"), "공고번호없음")
     ord_part = format_ord(metadata.get("bidNtceOrd"))
-    kind = safe_key_part(metadata.get("fileKind") or "공고첨부", "공고첨부")
-    ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url)
-    stem = safe_key_part(file_stem(metadata.get("fileName"), bid_no), bid_no)
+    ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url).lower()
+    doc_no = int(metadata.get("docNo") or metadata.get("fileSeq") or 0)
 
-    notice_dir = (
+    return (
         f"{prefix}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
-        f"biz_div={biz_div}/bidNtceNo={bid_no}_ord={ord_part}"
+        f"biz_div={biz_div}/{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"
     )
-    base_name = f"{stem}_{kind}"
-    key = f"{notice_dir}/{base_name}{ext}"
-    if used_keys is None:
-        return key
-
-    suffix = 2
-    while key in used_keys:
-        key = f"{notice_dir}/{base_name}_{suffix}{ext}"
-        suffix += 1
-    used_keys.add(key)
-    return key
 
 
-async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int, used_keys: set):
+async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int):
+    dedup_reason = metadata.get("dedupDropped")
+    if dedup_reason:
+        return {
+            "downloadStatus": "skipped",
+            "downloadPath": "",
+            "downloadSize": 0,
+            "contentType": "",
+            "downloadError": f"중복 제거: {dedup_reason}",
+        }
+
     file_url = str(metadata.get("fileUrl") or "").strip()
     if not file_url:
         return {
@@ -168,7 +201,7 @@ async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: in
     response.raise_for_status()
 
     content_type = response.headers.get("Content-Type", "")
-    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url, used_keys)
+    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url)
     extra_args = {"ContentType": content_type} if content_type else None
 
     body = io.BytesIO(response.content)
@@ -240,11 +273,9 @@ async def run(args: argparse.Namespace) -> None:
         print(f"[시작] {args.start:%Y-%m-%d} ~ {args.end:%Y-%m-%d} curated JSON={curated_count}건")
         print(f"[추출] 첨부문서 메타데이터={len(metadata)}건")
 
-        used_keys: set = set()
-
         async def bound_download(client, file_meta):
             async with sem:
-                return await upload_attachment(s3, args.bucket, client, file_meta, args.timeout, used_keys)
+                return await upload_attachment(s3, args.bucket, client, file_meta, args.timeout)
 
         async with httpx.AsyncClient() as client:
             results = await asyncio.gather(

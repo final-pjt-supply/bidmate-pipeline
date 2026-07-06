@@ -170,7 +170,7 @@ def collect_window(window_start, window_end, bucket):
                     raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
                     curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
                     put_json(s3, bucket, raw_key, record)
-                    put_json(s3, bucket, curated_key, to_curated(record, cat, window_end))
+                    put_json(s3, bucket, curated_key, to_curated(record, cat, raw_key))
                     saved_count += 1
 
             log.info(
