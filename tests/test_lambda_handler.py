@@ -103,3 +103,10 @@ def test_s3_throttle_is_temporary_failure(patched):
         {"Error": {"Code": "SlowDown", "Message": "slow"}}, "GetObject")
     resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
     assert resp["results"][0]["resultCode"] == "TemporaryFailure"
+
+
+def test_s3_network_error_is_temporary_failure(patched):
+    from botocore.exceptions import EndpointConnectionError
+    patched.get_error = EndpointConnectionError(endpoint_url="https://s3.amazonaws.com")
+    resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
+    assert resp["results"][0]["resultCode"] == "TemporaryFailure"

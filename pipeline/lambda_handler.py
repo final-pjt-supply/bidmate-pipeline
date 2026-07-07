@@ -10,7 +10,7 @@ import os
 from urllib.parse import unquote
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from parsing import extract_bytes
 from parsing.json_output import parse_doc_filename, to_json_doc
@@ -42,6 +42,19 @@ def output_key(src_key: str) -> str:
     return f"{DST_ROOT}{rest}.json"
 
 
+def _raise_s3_failure(e):
+    """S3 호출 예외를 Temporary/Permanent로 분류해 다시 raise한다."""
+    if isinstance(e, ClientError):
+        code = e.response.get("Error", {}).get("Code", "")
+        if code == "NoSuchKey":
+            raise PermanentFailure("NoSuchKey")
+        if code in _TEMPORARY_CODES:
+            raise TemporaryFailure(code)
+        raise PermanentFailure(f"s3 error: {code}")
+    # BotoCoreError: 연결 실패·타임아웃 등 전송 계층 → 일시적
+    raise TemporaryFailure(type(e).__name__)
+
+
 def _process_key(bucket: str, key: str) -> str:
     ext = os.path.splitext(key)[1].lower()
     if ext != ".hwp":
@@ -55,13 +68,8 @@ def _process_key(bucket: str, key: str) -> str:
 
     try:
         data = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        if code == "NoSuchKey":
-            raise PermanentFailure("NoSuchKey")
-        if code in _TEMPORARY_CODES:
-            raise TemporaryFailure(code)
-        raise PermanentFailure(f"s3 get error: {code}")
+    except (ClientError, BotoCoreError) as e:
+        _raise_s3_failure(e)
 
     try:
         result = extract_bytes(data, key)
@@ -74,11 +82,8 @@ def _process_key(bucket: str, key: str) -> str:
     try:
         s3.put_object(Bucket=bucket, Key=out_key, Body=body,
                       ContentType="application/json; charset=utf-8")
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        if code in _TEMPORARY_CODES:
-            raise TemporaryFailure(code)
-        raise PermanentFailure(f"s3 put error: {code}")
+    except (ClientError, BotoCoreError) as e:
+        _raise_s3_failure(e)
     return out_key
 
 
