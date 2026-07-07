@@ -29,7 +29,7 @@ except ModuleNotFoundError:
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 CURATED_PREFIX = "raw/curated/backfill"
 FILES_PREFIX = "raw/downloads/backfill"
-DEFAULT_CONCURRENCY = 8
+DEFAULT_CONCURRENCY = 16
 
 
 def day_suffixes(base: str, start_day: datetime, end_day: datetime):
@@ -231,7 +231,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", type=to_day, help="다운로드 대상 종료일 YYYY-MM-DD (기본: --start 와 동일)")
     parser.add_argument("--timeout", type=positive_int, default=60, help="파일 다운로드 제한 시간 초")
     parser.add_argument(
-        "--concurrency", type=positive_int, default=DEFAULT_CONCURRENCY, help="동시 다운로드 수 제한 (기본: 8)"
+        "--concurrency", type=positive_int, default=DEFAULT_CONCURRENCY, help="동시 다운로드 수 제한 (기본: 16)"
     )
     args = parser.parse_args()
     args.end = args.end or args.start

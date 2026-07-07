@@ -43,7 +43,7 @@ OPERATIONS = {
 NUM_OF_ROWS = 999
 TIMEOUT = 30
 MAX_RETRY = 3
-DEFAULT_CONCURRENCY = 8
+DEFAULT_CONCURRENCY = 12
 CALL_BUDGET = 95_000
 SAFE_KEY = re.compile(r"[^0-9A-Za-z가-힣._=-]+")
 
@@ -314,7 +314,7 @@ def parse_args():
     parser.add_argument("--end", help="수집 종료일 YYYY-MM-DD (기본: --start 와 동일)")
     parser.add_argument("--bucket", default=BUCKET_NAME, help="S3 bucket name")
     parser.add_argument(
-        "--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="동시 요청 수 제한 (기본: 8)"
+        "--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="동시 요청 수 제한 (기본: 12)"
     )
     return parser.parse_args()
 
