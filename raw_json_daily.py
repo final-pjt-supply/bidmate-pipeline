@@ -123,14 +123,14 @@ def notice_id(record, index):
     return f"{bid_no}-{bid_ord}"
 
 
-def notice_day(record, fallback_dt):
+def notice_partition_dt(record, fallback_dt):
     notice_dt = parse_dt(record.get("bidNtceDt")) or fallback_dt
-    return datetime(notice_dt.year, notice_dt.month, notice_dt.day)
+    return notice_dt
 
 
-def s3_json_key(prefix, cat, day, record, index):
+def s3_json_key(prefix, cat, partition_dt, record, index):
     return (
-        f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        f"{prefix}/year={partition_dt:%Y}/month={partition_dt:%m}/day={partition_dt:%d}/hour={partition_dt:%H}/"
         f"biz_div={cat}/{notice_id(record, index)}.json"
     )
 
@@ -166,9 +166,9 @@ def collect_window(window_start, window_end, bucket):
                     ):
                         continue
 
-                    day = notice_day(record, window_end)
-                    raw_key = s3_json_key(RAW_PREFIX, cat, day, record, index)
-                    curated_key = s3_json_key(CURATED_PREFIX, cat, day, record, index)
+                    partition_dt = notice_partition_dt(record, window_end)
+                    raw_key = s3_json_key(RAW_PREFIX, cat, partition_dt, record, index)
+                    curated_key = s3_json_key(CURATED_PREFIX, cat, partition_dt, record, index)
                     put_json(s3, bucket, raw_key, record)
                     put_json(s3, bucket, curated_key, to_curated(record, cat, raw_key))
                     saved_count += 1

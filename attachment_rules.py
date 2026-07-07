@@ -124,7 +124,13 @@ def format_ord(value: Any) -> str:
     return match.group(0).zfill(2) if match else "00"
 
 
-def file_s3_key(prefix: str, metadata: dict[str, Any], content_type: str, file_url: str):
+def file_s3_key(
+    prefix: str,
+    metadata: dict[str, Any],
+    content_type: str,
+    file_url: str,
+    include_hour: bool = False,
+):
     """Build anonymized attachment S3 key from notice id, order, doc number, and extension."""
     notice_dt = parse_dt(metadata.get("bidNtceDt")) or datetime.now()
     biz_div = safe_key_part(metadata.get("업무구분"), "미분류")
@@ -132,8 +138,8 @@ def file_s3_key(prefix: str, metadata: dict[str, Any], content_type: str, file_u
     ord_part = format_ord(metadata.get("bidNtceOrd"))
     ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url).lower()
     doc_no = int(metadata.get("docNo") or metadata.get("fileSeq") or 0)
+    partition_path = f"{prefix}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
+    if include_hour:
+        partition_path += f"hour={notice_dt:%H}/"
 
-    return (
-        f"{prefix}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
-        f"biz_div={biz_div}/{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"
-    )
+    return partition_path + f"biz_div={biz_div}/{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"

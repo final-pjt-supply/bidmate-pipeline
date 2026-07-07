@@ -96,7 +96,7 @@ def upload_attachment(
     response.raw.decode_content = True
 
     content_type = response.headers.get("Content-Type", "")
-    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url)
+    key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url, include_hour=True)
     extra_args = {"ContentType": content_type} if content_type else None
     if extra_args:
         s3.upload_fileobj(response.raw, bucket, key, ExtraArgs=extra_args)
@@ -116,7 +116,7 @@ def upload_attachment(
 
 def put_manifest(s3, bucket: str, metadata: list[dict[str, Any]], run_dt: datetime):
     key = (
-        f"{METADATA_PREFIX}/year={run_dt:%Y}/month={run_dt:%m}/day={run_dt:%d}/"
+        f"{METADATA_PREFIX}/year={run_dt:%Y}/month={run_dt:%m}/day={run_dt:%d}/hour={run_dt:%H}/"
         f"bid_files_{run_dt:%Y%m%d%H%M%S}.json"
     )
     s3.put_object(

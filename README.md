@@ -79,7 +79,8 @@ s3://bidmate/raw/curated/{backfill,daily}/    # schema.py 변환 결과 (47필�
 s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/ (다운로드 manifest)
 ```
 
-세 prefix 모두 `year=YYYY/month=MM/day=DD` Hive 파티션을 따르며, `backfill/`과 `daily/`는
+`backfill/`은 `year=YYYY/month=MM/day=DD`, `daily/`는
+`year=YYYY/month=MM/day=DD/hour=HH` Hive 파티션을 따른다. `backfill/`과 `daily/`는
 쓰는 스크립트와 읽는 스크립트가 항상 짝을 이룬다 (backfill 수집분은 backfill 다운로더만 소비).
 
 저장 단위와 파일명 규칙은 daily/backfill 모두 공고 단위를 기준으로 맞춘다:
@@ -283,6 +284,7 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
   `json_file_download_daily.py`를 그대로 호출한다.
 - 수집 task는 `raw_json_daily.py --minutes 5`로 실행한다. 나라장터 조회 창은 실제
   준실시간 수집 기준이므로 최근 5분으로 고정한다.
+- daily S3 적재 경로는 시간대별 조회와 모니터링이 쉽도록 `hour=HH` 파티션까지 나눈다.
 - 다운로드 task는 `json_file_download_daily.py --minutes 15`로 실행한다. 이는 공고를
   15분치 수집한다는 뜻이 아니라, 앞 task 지연이나 Airflow 재시도 지연으로 S3에 저장된
   curated JSON을 놓치지 않기 위한 완충 창이다.
