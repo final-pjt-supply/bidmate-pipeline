@@ -22,6 +22,7 @@ docs/
 *.pdf
 /*.txt
 !requirement.txt
+!requirements-lambda.txt
 
 # 환경변수 파일
 .env
@@ -30,3 +31,4 @@ docs/
 # 로컬 작업용 문서(project.md, CLAUDE.md)와 docs/는 공유하지 않는다.
 CLAUDE.md
 project.md
+프로그램 명세서.md
