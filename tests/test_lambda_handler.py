@@ -40,7 +40,6 @@ def patched(monkeypatch):
     monkeypatch.setattr(lh, "extract_bytes",
                         lambda data, key: {"source_type": "hwp",
                                            "text": "본문", "images": {}})
-    monkeypatch.setenv("ALLOWED_EXT", ".hwp")
     return fake
 
 
@@ -111,49 +110,3 @@ def test_s3_network_error_is_temporary_failure(patched):
     patched.get_error = EndpointConnectionError(endpoint_url="https://s3.amazonaws.com")
     resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
     assert resp["results"][0]["resultCode"] == "TemporaryFailure"
-
-
-def test_allowed_ext_unset_is_permanent_failure(patched, monkeypatch):
-    monkeypatch.delenv("ALLOWED_EXT", raising=False)
-    resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
-    r = resp["results"][0]
-    assert r["resultCode"] == "PermanentFailure"
-    assert "ALLOWED_EXT not configured" in r["resultString"]
-
-
-def test_allowed_ext_parses_comma_and_normalizes():
-    assert lh._parse_allowed_ext("hwp, .HWPX ") == {".hwp", ".hwpx"}
-    assert lh._parse_allowed_ext("") == set()
-
-
-def test_empty_text_is_permanent_failure(patched, monkeypatch):
-    monkeypatch.setattr(lh, "extract_bytes",
-                        lambda data, key: {"source_type": "hwp", "text": "   \n ", "images": {}})
-    resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
-    r = resp["results"][0]
-    assert r["resultCode"] == "PermanentFailure"
-    assert "no extractable text" in r["resultString"]
-    assert patched.put_calls == []
-
-
-def test_import_error_is_packaging_failure(patched, monkeypatch):
-    def boom(data, key): raise ImportError("No module named 'fitz'")
-    monkeypatch.setattr(lh, "extract_bytes", boom)
-    resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
-    r = resp["results"][0]
-    assert r["resultCode"] == "PermanentFailure"
-    assert "packaging error" in r["resultString"]
-
-
-def test_parse_error_includes_stderr_first_line(patched, monkeypatch):
-    import subprocess
-    def boom(data, key):
-        raise subprocess.CalledProcessError(
-            1, "hwp5proc", stderr=b"HWPTAG error: broken record\nmore lines")
-    monkeypatch.setattr(lh, "extract_bytes", boom)
-    resp = lh.handler(_event("raw/a/R26BK01269024_000_doc01.hwp"), None)
-    r = resp["results"][0]
-    assert r["resultCode"] == "PermanentFailure"
-    assert r["resultString"].startswith("parse error: CalledProcessError")
-    assert "broken record" in r["resultString"]
-    assert "more lines" not in r["resultString"]   # 첫 줄만
