@@ -276,6 +276,25 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
   `pytest.ini`)를 제거하고, 비동기 스크립트를 저장소 루트로 이동해 backfill 구현을
   일원화했다. 위 "병행 구축"과 "패키지 분리" 항목은 과도기의 결정 기록이다.
 
+### 5분 준실시간 Airflow DAG (2026-07-07)
+
+- EC2 위 Airflow에서 `dags/bidding_daily_dag.py`를 5분마다 실행하도록 구성한다.
+  DAG는 orchestration만 담당하고, 실제 로직은 기존 `raw_json_daily.py`와
+  `json_file_download_daily.py`를 그대로 호출한다.
+- 수집 task는 `raw_json_daily.py --minutes 5`로 실행한다. 나라장터 조회 창은 실제
+  준실시간 수집 기준이므로 최근 5분으로 고정한다.
+- 다운로드 task는 `json_file_download_daily.py --minutes 15`로 실행한다. 이는 공고를
+  15분치 수집한다는 뜻이 아니라, 앞 task 지연이나 Airflow 재시도 지연으로 S3에 저장된
+  curated JSON을 놓치지 않기 위한 완충 창이다.
+- DAG 설정은 `catchup=False`, `max_active_runs=1`, `retries=2`를 기본으로 둔다.
+  과거 미실행 구간을 몰아서 따라잡지 않고, 이전 실행이 끝나기 전에 다음 5분 실행이
+  겹치지 않게 하기 위한 선택이다.
+- 초기 운영에서는 daily 다운로드를 순차 처리로 유지한다. 병목이 실제로 관찰되면
+  `ThreadPoolExecutor(max_workers=3~5)` 기반 제한 병렬화를 검토한다.
+- 15분 다운로드 창은 중복 다운로드 가능성을 감수하고 누락을 줄이는 단기 방안이다.
+  중복이나 재처리가 운영상 문제가 되면 DB 상태 컬럼(`pending`/`downloaded`/`failed`)
+  기반으로 전환한다.
+
 ## 9. 다음 로드맵
 
 - daily 파이프라인의 비동기 전환 검토
