@@ -37,6 +37,6 @@ def extract_document(data: bytes, filename: str, describe_fn=None) -> ExtractRes
         from parsing.hwp_extractor import extract_hwp
         return extract_hwp(data, describe_fn=describe_fn)
     if fmt == "pdf":
-        from lambda_app.pdf_extractor import extract_pdf
+        from backfill_lambda.pdf_extractor import extract_pdf
         return extract_pdf(data, describe_fn=describe_fn)
     raise ValueError(f"지원하지 않는 형식: {fmt}")

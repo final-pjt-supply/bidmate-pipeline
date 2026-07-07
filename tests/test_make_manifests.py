@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import csv
-from lambda_app import make_manifests as mm
+from backfill_lambda import make_manifests as mm
 
 
 def test_split_by_ext_groups_and_ignores_others():

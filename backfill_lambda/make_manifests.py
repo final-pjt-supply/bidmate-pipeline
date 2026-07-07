@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """raw/ 스캔 → 확장자별 S3 Batch 매니페스트 CSV(bucket,key) 생성.
 
-사용: python -m lambda_app.make_manifests --bucket bidmate --prefix raw/downloads/ \
+사용: python -m backfill_lambda.make_manifests --bucket bidmate --prefix raw/downloads/ \
         --outdir ./manifests [--sample-largest 40]
 """
 import argparse

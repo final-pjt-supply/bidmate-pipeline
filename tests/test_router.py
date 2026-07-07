@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from lambda_app import router
+from backfill_lambda import router
 
 
 def test_detect_format_by_magic():
@@ -24,7 +24,7 @@ def test_router_oralabel_hwp_routes_to_hwpx(monkeypatch):
 
 def test_router_pdf_routes_to_pdf(monkeypatch):
     called = {}
-    import lambda_app.pdf_extractor as px
+    import backfill_lambda.pdf_extractor as px
     monkeypatch.setattr(px, "extract_pdf",
                         lambda data, describe_fn=None: called.setdefault("fn", "pdf"))
     router.extract_document(b"%PDF-1.7 xxx", "x.pdf")

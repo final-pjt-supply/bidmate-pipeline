@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: 다포맷(HWP/HWPX/PDF) 추출 Lambda × S3 Batch (lambda_app)
+Description: 다포맷(HWP/HWPX/PDF) 추출 Lambda × S3 Batch (backfill_lambda)
 
 Parameters:
   Bucket:

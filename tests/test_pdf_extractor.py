@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import fitz
-from lambda_app.pdf_extractor import extract_pdf
+from backfill_lambda.pdf_extractor import extract_pdf
 
 
 def _two_page_pdf() -> bytes:

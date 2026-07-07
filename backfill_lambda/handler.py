@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """S3 Batch Operations용 다포맷(HWP/HWPX/PDF) 추출 Lambda 핸들러.
 
-기존 parsing/·pipeline/ 를 수정하지 않고 lambda_app/ 안에서 독립 동작한다.
+기존 parsing/·pipeline/ 를 수정하지 않고 backfill_lambda/ 안에서 독립 동작한다.
 task 1건(오브젝트 1개)을 받아 raw/ 다운로드→router.extract_document→extracted/ 미러
 경로에 페이지 분할 JSON 업로드. S3 Batch 응답 계약(resultCode 분류)을 반환한다.
 """
@@ -13,7 +13,7 @@ from urllib.parse import unquote
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from lambda_app.router import extract_document
+from backfill_lambda.router import extract_document
 from parsing.json_output import parse_doc_filename, to_json_doc
 
 logger = logging.getLogger()

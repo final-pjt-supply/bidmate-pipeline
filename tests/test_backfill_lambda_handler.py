@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from lambda_app import handler as h
+from backfill_lambda import handler as h
 
 
 class FakeBody:
