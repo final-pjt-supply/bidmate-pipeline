@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    realtime-dev-ds 버킷의 S3 이벤트 알림(raw/downloads/realtime/ → SQS 3개)과
+    realtime-dev-ds 버킷의 S3 이벤트 알림(raw/downloads/biz_div={업종}/realtime/ → SQS 3개)과
     각 큐의 "S3가 SendMessage 하도록 허용"하는 리소스 정책을 설정한다.
 
 .DESCRIPTION
@@ -8,13 +8,16 @@
        S3(realtime-dev-ds 버킷)가 SendMessage 할 수 있도록 허용하는 정책을 붙인다.
        (S3가 버킷 알림을 큐로 보내려면 이 정책이 먼저 있어야 함 — 없으면 ②에서 실패)
     ② 버킷 realtime-dev-ds에 이벤트 알림을 설정한다.
-       prefix=raw/downloads/realtime/ 로 좁혀서 백필 파이프라인의
-       raw/downloads/backfill/ 은 트리거되지 않게 하고, 확장자(suffix)로
-       .pdf/.hwp/.hwpx를 각각 다른 큐로 라우팅한다.
+       key 구조가 raw/downloads/biz_div={업종}/{stage}/year=/month=/day=/... 라서
+       (biz_div가 stage보다 앞) realtime만 트리거하려면 biz_div 값마다 규칙을 따로
+       만들어야 한다. biz_div 4종(thng/servc/cnstwk/frgcpt) × 큐 3개 = 12개 규칙을
+       prefix=raw/downloads/biz_div={업종}/realtime/ 로 생성하고, 확장자(suffix)로
+       .pdf/.hwp/.hwpx를 각각 다른 큐로 라우팅한다. backfill(raw/.../backfill/)은
+       prefix에 안 걸려서 트리거되지 않는다.
 
     ⚠ put-bucket-notification-configuration은 버킷의 알림 설정 "전체"를 교체한다.
-      이 3개 규칙 외에 다른 알림이 버킷에 이미 설정돼 있다면 이 스크립트 실행 후 사라진다.
-      (이 스크립트만 반복 실행하는 건 멱등 — 같은 3규칙으로 매번 덮어씀)
+      이 12개 규칙 외에 다른 알림이 버킷에 이미 설정돼 있다면 이 스크립트 실행 후 사라진다.
+      (이 스크립트만 반복 실행하는 건 멱등 — 같은 규칙으로 매번 덮어씀)
 
 .NOTES
     JSON을 커맨드라인 인자로 직접 넘기면 PowerShell 따옴표 이스케이프 문제가 잦다.
@@ -28,10 +31,11 @@
 #>
 
 param(
-    [string]$Region    = "ap-northeast-2",
-    [string]$Account   = "890608337282",
-    [string]$Bucket    = "realtime-dev-ds",
-    [string]$RawPrefix = "raw/downloads/realtime/"
+    [string]$Region   = "ap-northeast-2",
+    [string]$Account  = "890608337282",
+    [string]$Bucket   = "realtime-dev-ds",
+    [string]$Stage    = "realtime",
+    [string[]]$BizDivs = @("thng", "servc", "cnstwk", "frgcpt")
 )
 
 $ErrorActionPreference = "Stop"
@@ -105,20 +109,23 @@ foreach ($q in $queues) {
 }
 
 # ============================================================
-# ② S3 버킷 이벤트 알림 설정 (raw/downloads/realtime/ prefix + 확장자별 큐 라우팅)
+# ② S3 버킷 이벤트 알림 설정
+#    biz_div 4종 × 큐 3개 = 규칙 12개. prefix가 biz_div마다 달라야 해서 이중 순회.
 # ============================================================
 $notificationConfig = @{
-    QueueConfigurations = $queueConfigs | ForEach-Object {
-        @{
-            Id       = $_.Id
-            QueueArn = $_.Arn
-            Events   = @("s3:ObjectCreated:*")
-            Filter   = @{
-                Key = @{
-                    FilterRules = @(
-                        @{ Name = "prefix"; Value = $RawPrefix }
-                        @{ Name = "suffix"; Value = $_.Suffix }
-                    )
+    QueueConfigurations = foreach ($biz in $BizDivs) {
+        foreach ($q in $queueConfigs) {
+            @{
+                Id       = "$($q.Id)_$biz"
+                QueueArn = $q.Arn
+                Events   = @("s3:ObjectCreated:*")
+                Filter   = @{
+                    Key = @{
+                        FilterRules = @(
+                            @{ Name = "prefix"; Value = "raw/downloads/biz_div=$biz/$Stage/" }
+                            @{ Name = "suffix"; Value = $q.Suffix }
+                        )
+                    }
                 }
             }
         }
@@ -133,4 +140,4 @@ aws s3api put-bucket-notification-configuration `
     --notification-configuration "file://$notificationPath" `
     --region $Region
 
-Write-Host "버킷 $Bucket 이벤트 알림 설정 완료 (prefix=$RawPrefix, 큐 3개)"
+Write-Host "버킷 $Bucket 이벤트 알림 설정 완료 (biz_div $($BizDivs.Count)종 x 큐 3개 = 규칙 $($BizDivs.Count * $queueConfigs.Count)개, stage=$Stage)"
