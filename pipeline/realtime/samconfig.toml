@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "realtime-dev"
+resolve_s3 = true
+s3_prefix = "realtime-dev"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = "ImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest\" SourceBucketName=\"realtime-dev-ds\" LlmExtractQueueUrl=\"\" LlmExtractQueueArn=\"arn:aws:sqs:ap-northeast-2:890608337282:REPLACE-ME-llm-extract-queue\""
+image_repositories = []
+
+[default.global.parameters]
+region = "ap-northeast-2"

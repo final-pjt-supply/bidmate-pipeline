@@ -1,0 +1,9 @@
+# hwp.py / hwpx.py가 parsing.hwp_hwpx를 재사용 (repo 최상위 requirement.txt와 버전 맞출 것)
+lxml
+pyhwp   # hwp5proc 바이너리 제공 — extract_hwp가 subprocess로 호출
+
+pymupdf<1.25   # pdf.py가 parsing.pdf.pdf_extractor 재사용 + 스캔본 감지
+               # 1.25+는 manylinux_2_28(glibc>=2.28) 휠만 배포 — Lambda AL2 베이스(glibc 2.26)에서
+               # 소스 빌드로 떨어짐. 1.24.x가 manylinux2014 휠을 배포하는 마지막 라인업.
+
+boto3   # handlers가 S3 다운로드/업로드 + SQS 전송에 사용

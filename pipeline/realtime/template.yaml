@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  실시간 입찰공고 문서 처리 파이프라인.
+  S3 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → Lambda 텍스트 추출.
+  S3 이벤트 알림(원본 버킷 → 큐 라우팅)은 이 template 밖에서 배포 후 별도 설정한다
+  (realtime-dev-ds 버킷이 SAM 스택 밖에서 이미 만들어져 있음).
+
+Globals:
+  Function:
+    Timeout: 120       # 큰 PDF 대비 여유 있게
+    MemorySize: 1024
+
+Parameters:
+  ImageUri:
+    Type: String
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest
+    Description: >
+      이미 ECR에 push된 추출기 이미지. SAM이 새로 빌드하지 않고 이 이미지를 그대로 참조한다
+      (pdf/hwp/hwpx 3개 함수가 이미지 하나를 공유하고 ImageConfig.Command만 다르게 오버라이드).
+
+  SourceBucketName:
+    Type: String
+    Default: realtime-dev-ds
+    Description: raw/text_extracted가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된 버킷이라 이름만 참조.
+
+  LlmExtractQueueUrl:
+    Type: String
+    Default: ""
+    Description: "PLACEHOLDER — 다음 단계(LLM 추출) SQS 큐 URL. 큐가 정해지면 실제 값으로 교체."
+
+  LlmExtractQueueArn:
+    Type: String
+    Default: "arn:aws:sqs:ap-northeast-2:890608337282:REPLACE-ME-llm-extract-queue"
+    Description: "PLACEHOLDER — 위 큐의 ARN(SendMessage 권한 Resource로 사용). 실제 큐 생성 후 교체."
+
+Resources:
+  # ============================================================
+  # SQS — 메인 큐 3개 + DLQ 3개 (maxReceiveCount 3회 초과 시 DLQ로 이동)
+  # ============================================================
+  ExtractPdfDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-pdf-queue-dlq
+
+  ExtractPdfQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-pdf-queue
+      VisibilityTimeout: 720   # Lambda Timeout(120s)의 6배 — AWS 권장값
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ExtractPdfDlq.Arn
+        maxReceiveCount: 3
+
+  ExtractHwpDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-hwp-queue-dlq
+
+  ExtractHwpQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-hwp-queue
+      VisibilityTimeout: 720
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ExtractHwpDlq.Arn
+        maxReceiveCount: 3
+
+  ExtractHwpxDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-hwpx-queue-dlq
+
+  ExtractHwpxQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: extract-hwpx-queue
+      VisibilityTimeout: 720
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ExtractHwpxDlq.Arn
+        maxReceiveCount: 3
+
+  # ============================================================
+  # IAM — 함수별 실행 역할.
+  # 셋 다 동일한 패턴(S3 읽기 raw/*, S3 쓰기 text_extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
+  # "자기 큐" 수신 권한이 함수마다 다른 큐로 스코프돼야 해서 역할을 3개로 분리했다.
+  # ============================================================
+  ExtractPdfFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: extract-pdf-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # CloudWatch Logs 기본 쓰기 권한 (Lambda 실행 로그)
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: extract-pdf-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadRawDocuments
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+              - Sid: WriteExtractedText
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+        - PolicyName: extract-pdf-sqs-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReceiveFromOwnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ExtractPdfQueue.Arn
+              - Sid: SendToNextQueue
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !Ref LlmExtractQueueArn
+
+  ExtractHwpFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: extract-hwp-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: extract-hwp-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadRawDocuments
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+              - Sid: WriteExtractedText
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+        - PolicyName: extract-hwp-sqs-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReceiveFromOwnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ExtractHwpQueue.Arn
+              - Sid: SendToNextQueue
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !Ref LlmExtractQueueArn
+
+  ExtractHwpxFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: extract-hwpx-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: extract-hwpx-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadRawDocuments
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+              - Sid: WriteExtractedText
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+        - PolicyName: extract-hwpx-sqs-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReceiveFromOwnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ExtractHwpxQueue.Arn
+              - Sid: SendToNextQueue
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !Ref LlmExtractQueueArn
+
+  # ============================================================
+  # Lambda — 3개 함수, 이미지 1개 공유(ImageUri 동일) + ImageConfig.Command만 다르게.
+  # 각각 대응하는 큐를 SQS 트리거로 연결. BatchSize=1: handler가 배치 내 실패를 개별
+  # 처리하지 않고 예외 하나로 전체를 재시도시키므로(코드 참고: src/handlers/*), 한 번에
+  # 메시지 1개씩만 받아야 실패한 메시지만 정확히 재시도/DLQ된다.
+  # ============================================================
+  ExtractPdfFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: extract-pdf
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers.extract_pdf.lambda_handler"]
+      Role: !GetAtt ExtractPdfFunctionRole.Arn
+      Environment:
+        Variables:
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+      Events:
+        PdfQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ExtractPdfQueue.Arn
+            BatchSize: 1
+
+  ExtractHwpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: extract-hwp
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers.extract_hwp.lambda_handler"]
+      Role: !GetAtt ExtractHwpFunctionRole.Arn
+      Environment:
+        Variables:
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+      Events:
+        HwpQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ExtractHwpQueue.Arn
+            BatchSize: 1
+
+  ExtractHwpxFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: extract-hwpx
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers.extract_hwpx.lambda_handler"]
+      Role: !GetAtt ExtractHwpxFunctionRole.Arn
+      Environment:
+        Variables:
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+      Events:
+        HwpxQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ExtractHwpxQueue.Arn
+            BatchSize: 1
