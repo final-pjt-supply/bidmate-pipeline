@@ -282,15 +282,19 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
 - EC2 위 Airflow에서 `dags/bidding_daily_dag.py`를 5분마다 실행하도록 구성한다.
   DAG는 orchestration만 담당하고, 실제 로직은 기존 `raw_json_daily.py`와
   `json_file_download_daily.py`를 그대로 호출한다.
-- 수집 task는 `raw_json_daily.py --minutes 5`로 실행한다. 나라장터 조회 창은 실제
-  준실시간 수집 기준이므로 최근 5분으로 고정한다.
+- 수집 task는 기본적으로 `raw_json_daily.py --minutes 5`로 실행한다. 다만
+  Airflow Variable `bidding_daily_last_success_at` 기준 gap이 30분 이하이면
+  `last_success_at ~ 현재 시각`만큼 `--minutes`를 늘려 짧은 지연을 자동 복구한다.
 - daily S3 적재 경로는 시간대별 조회와 모니터링이 쉽도록 `hour=HH` 파티션까지 나눈다.
-- 다운로드 task는 `json_file_download_daily.py --minutes 15`로 실행한다. 이는 공고를
-  15분치 수집한다는 뜻이 아니라, 앞 task 지연이나 Airflow 재시도 지연으로 S3에 저장된
-  curated JSON을 놓치지 않기 위한 완충 창이다.
+- 다운로드 task는 기본적으로 `json_file_download_daily.py --minutes 15`로 실행한다.
+  이는 공고를 15분치 수집한다는 뜻이 아니라, 앞 task 지연이나 Airflow 재시도 지연으로
+  S3에 저장된 curated JSON을 놓치지 않기 위한 완충 창이다. gap 복구로 수집 창이
+  15분보다 커지면 다운로드 창도 같은 크기로 늘린다.
 - DAG 설정은 `catchup=False`, `max_active_runs=1`, `retries=2`를 기본으로 둔다.
   과거 미실행 구간을 몰아서 따라잡지 않고, 이전 실행이 끝나기 전에 다음 5분 실행이
   겹치지 않게 하기 위한 선택이다.
+- Airflow 2/3 차이를 흡수하기 위해 `schedule_interval`/`schedule` 인자를 런타임에
+  선택하고, `PythonOperator` import도 버전에 맞게 fallback한다.
 - Airflow Variable `bidding_daily_last_success_at`에 마지막 처리 기준 시각을 저장한다.
   gap이 30분 이하이면 `last_success_at ~ 현재 시각`까지 수집 창을 넓혀 짧은 지연을 자동 복구한다.
 - gap이 30분을 초과하면 긴 구간은 자동 수집하지 않고
