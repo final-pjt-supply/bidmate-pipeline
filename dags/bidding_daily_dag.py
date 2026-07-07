@@ -8,12 +8,17 @@ import math
 import os
 import subprocess
 from datetime import datetime, timedelta
+from inspect import signature
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from airflow import DAG
 from airflow.models import Variable
-from airflow.operators.python import PythonOperator
+
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+except ImportError:
+    from airflow.operators.python import PythonOperator
 
 
 # EC2/Airflow 환경에서 repo 위치나 Python 경로가 다르면 환경변수로 덮어쓴다.
@@ -196,19 +201,25 @@ default_args = {
     "on_failure_callback": record_failed_window,
 }
 
-
-with DAG(
-    dag_id="bidding_daily_pipeline",
-    description="Collect recent bid notices and download their attachments every 5 minutes.",
-    default_args=default_args,
-    schedule_interval="*/5 * * * *",
-    start_date=datetime(2026, 1, 1),
+dag_kwargs = {
+    "dag_id": "bidding_daily_pipeline",
+    "description": "Collect recent bid notices and download their attachments every 5 minutes.",
+    "default_args": default_args,
+    "start_date": datetime(2026, 1, 1),
     # 실시간성 DAG라 과거 미실행 구간을 한꺼번에 따라잡지 않는다.
-    catchup=False,
+    "catchup": False,
     # 이전 5분 실행이 끝나기 전에 다음 실행이 겹치지 않게 막는다.
-    max_active_runs=1,
-    tags=["bidding", "daily", "s3"],
-) as dag:
+    "max_active_runs": 1,
+    "tags": ["bidding", "daily", "s3"],
+}
+
+# Airflow 2는 schedule_interval, Airflow 3은 schedule을 사용한다.
+if "schedule" in signature(DAG).parameters:
+    dag_kwargs["schedule"] = "*/5 * * * *"
+else:
+    dag_kwargs["schedule_interval"] = "*/5 * * * *"
+
+with DAG(**dag_kwargs) as dag:
     plan_daily_window = PythonOperator(
         task_id="plan_window",
         python_callable=plan_window,
