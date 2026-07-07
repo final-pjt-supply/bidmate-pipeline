@@ -29,28 +29,46 @@ SCHEMA = {
     ),
     "item_codes": (
         "list[{type:str, code:str}]|null — 품목/업종 분류 코드. "
-        "type은 코드 체계 이름(예: '세부품명번호', '업종코드'), code는 실제 코드 값."
+        "type은 코드 체계 이름(예: '세부품명번호', '업종코드' 같은 분류 체계 이름), code는 문서에 실제로 적힌 코드 값."
     ),
     "region_limit_type": "str|null — 지역 제한 종류. 'hq_location'(본점 소재지 제한) 또는 'none'(제한 없음).",
-    "region_limit_names": "list[str]|null — 제한 지역명. 예: [\"전북특별자치도\"]",
-    "region_basis": "str|null — 지역 제한 판단 기준. 예: '입찰공고일 기준 90일 이상 계속 소재'",
+    "region_limit_names": "list[str]|null — 제한 지역명. 문서에 실제로 적힌 지역명 그대로(예: [\"<지역명>\"] 형식).",
+    "region_basis": "str|null — 지역 제한 판단 기준. 문서에 실제로 적힌 기준일/기간 설명 그대로(예: '<기준일/기간 설명>' 형식).",
     "performance_reqs": (
         "list[{category:str, basis:str, value:number, unit:str, scope_raw:str}]|null — 실적 요건. "
-        "category=실적 유형(예:'일반철도신호공사'), basis=인정 기준(예:'최근 3년'), "
-        "value/unit=최소 실적 수치와 단위(예: 300000000/'원'), scope_raw=원문 그대로의 범위 설명."
+        "category=실적 유형, basis=인정 기준(예: '<기간>'), "
+        "value/unit=문서에 실제로 적힌 최소 실적 수치와 단위(예: <금액>/'<단위>'), scope_raw=원문 그대로의 범위 설명."
     ),
     "capacity_reqs": "list[{name:str, value:number, unit:str}]|null — 보유 설비·시설·생산능력 요건.",
     "personnel_reqs": (
         "list[{field:str, grade:str, count:int}]|null — 필수 기술인력. "
         "field=전문분야, grade=등급(고급/중급/초급 등), count=인원수."
     ),
-    "required_certs": "list[str]|null — 필수 인증. 예: [\"GS인증\", \"ISO 27001\"]",
-    "award_cutline_type": "str|null — 낙찰 커트라인 방식. 'score'(적격심사 등 점수제) 또는 'rate'(낙찰하한율 등 비율제).",
-    "award_cutline_value": "number|null — award_cutline_type에 대응하는 수치(점수 또는 %).",
+    "required_certs": "list[str]|null — 필수 인증. 문서에 실제로 적힌 인증명 그대로(예: [\"<인증명>\"] 형식).",
+    "award_cutline_type": (
+        "str|null — 낙찰 커트라인 방식. "
+        "'score'=적격심사 등 점수제 통과 점수(예: '종합평점 95점 이상'), "
+        "'rate'=낙찰하한율 등 비율제(예: '낙찰하한율 87.745% 이상'), "
+        "'lowest_price'=최저가낙찰(예: '예정가격 이하 최저가 입찰자', '규격적격자 중 최저가 입찰자' — "
+        "점수·비율 커트라인 자체가 없는 방식). 셋 중 하나."
+    ),
+    "award_cutline_value": (
+        "number|null — award_cutline_type에 대응하는 수치(점수 또는 %). "
+        "award_cutline_type이 'lowest_price'이면 정해진 수치가 없는 방식이므로 award_cutline_value는 null이 정상이다."
+    ),
     "tech_weight": "number|null — 기술(또는 이행능력) 평가 배점 비중.",
     "price_weight": "number|null — 가격 평가 배점 비중.",
-    "joint_venture_allowed": "bool|null — 공동수급(컨소시엄) 허용 여부.",
-    "subcontract_allowed": "bool|null — 하도급 허용 여부.",
+    "joint_venture_allowed": (
+        "bool|null — 공동수급(컨소시엄) 허용 여부. "
+        "'공동계약: 불가/불허' 또는 '공동수급을 허용하지 않음' -> false. "
+        "'공동계약 가능' 또는 '공동수급 가능(공동이행/분담이행 등)' -> true. "
+        "표 형태나 짧은 항목으로만 적혀 있어도(예: '공동계약: 불허' 한 줄) 반드시 반영한다."
+    ),
+    "subcontract_allowed": (
+        "bool|null — 하도급 허용 여부. "
+        "'하도급 금지/불허/승인 없이 금지' -> false, '하도급 가능/허용' -> true. "
+        "명시적 언급이 없으면 null(임의로 추측하지 말 것)."
+    ),
     "evidence": (
         "list[{field:str, page:int, snippet:str}] — null이 아닌 값을 채운 필드에 대해서만 근거를 남긴다. "
         "field=근거가 되는 위 스키마 키 이름, page=근거가 있는 [페이지 N] 마커의 N, "
@@ -73,7 +91,7 @@ REQUIRED_FIELDS = tuple(SCHEMA.keys())
 _ENUM_FIELDS = {
     "company_size_limit": {"sme_only", "small_only", "no_large", "no_conglomerate", "none", None},
     "region_limit_type": {"hq_location", "none", None},
-    "award_cutline_type": {"score", "rate", None},
+    "award_cutline_type": {"score", "rate", "lowest_price", None},
 }
 
 _BOOL_FIELDS = ("direct_production_req", "credit_rating_req", "joint_venture_allowed", "subcontract_allowed")
@@ -101,8 +119,72 @@ def _extract_json_text(raw: str) -> str:
     return raw
 
 
-def parse_and_validate(raw_content: str) -> dict:
-    """LLM 응답 문자열을 JSON으로 파싱하고 스키마(필드 존재/타입/enum)를 검증한다."""
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize(text: str) -> str:
+    """공백 차이를 무시하고 비교하기 위한 정규화(줄바꿈/띄어쓰기 전부 제거)."""
+    return _WHITESPACE_RE.sub("", text)
+
+
+def _drop_ungrounded_evidence(data: dict, document_text: str) -> int:
+    """evidence.snippet이 document_text에 실제로 존재하지 않으면 그 항목을 드랍한다.
+
+    프롬프트가 아무리 잘 짜여도 모델이 few-shot/스키마 설명문을 베껴 evidence를
+    지어내는 걸 완전히 막을 수 없어서, 구조적으로 걸러내는 마지막 안전망이다.
+    """
+    evidence = data.get("evidence")
+    if not evidence:
+        return 0
+    normalized_doc = _normalize(document_text)
+    kept, dropped = [], 0
+    for item in evidence:
+        snippet = item.get("snippet", "") if isinstance(item, dict) else ""
+        if snippet and _normalize(snippet) in normalized_doc:
+            kept.append(item)
+        else:
+            dropped += 1
+    data["evidence"] = kept
+    return dropped
+
+
+_DOMAIN_FIELDS = tuple(f for f in REQUIRED_FIELDS if f not in ("evidence", "not_found"))
+
+
+def _demote_ungrounded_values(data: dict) -> int:
+    """evidence가 하나도 안 남은 non-null/non-empty 필드는 값을 null로 강등한다.
+
+    evidence 그라운딩 필터(_drop_ungrounded_evidence)는 evidence 배열만 청소하지
+    최상위 값 자체는 건드리지 않는다 — 그래서 "evidence 없이 값만 우겨넣는" 유형의
+    오염(예: 실제 근거 없이 award_cutline_type/value를 채우는 경우)이 그대로 남는다.
+    반드시 document_text 그라운딩 검증 뒤에 호출해야 한다(드랍 후 살아남은
+    evidence만 "그라운딩됨"으로 인정하기 위함).
+    """
+    grounded_fields = {
+        item["field"]
+        for item in data.get("evidence") or []
+        if isinstance(item, dict) and "field" in item
+    }
+    demoted = 0
+    for field in _DOMAIN_FIELDS:
+        value = data.get(field)
+        is_empty = value is None or (isinstance(value, list) and len(value) == 0)
+        if not is_empty and field not in grounded_fields:
+            data[field] = None
+            demoted += 1
+    return demoted
+
+
+def parse_and_validate(raw_content: str, document_text: str | None = None) -> dict:
+    """LLM 응답 문자열을 JSON으로 파싱하고 스키마(필드 존재/타입/enum)를 검증한다.
+
+    document_text가 주어지면:
+    1) evidence.snippet이 실제로 그 문서에 있는지 대조해서 없는 항목은 드랍
+    2) 드랍 후에도 evidence가 하나도 안 남은 non-null 필드는 값을 null로 강등
+    (값 자체가 evidence 없이 지어진 경우까지 걸러내는 이중 안전망)
+    개수는 각각 data["_meta"]["dropped_evidence"] / ["demoted_values"]에 남긴다
+    (document_text 없이 호출하면 이 검증들은 건너뛴다 — 기존 호출부/테스트 호환용).
+    """
     try:
         data = json.loads(raw_content.strip())
     except json.JSONDecodeError:
@@ -123,5 +205,10 @@ def parse_and_validate(raw_content: str) -> dict:
     for field in _LIST_FIELDS:
         if data[field] is not None and not isinstance(data[field], list):
             raise ValueError(f"{field}는 list|null이어야 함: {type(data[field])}")
+
+    if document_text is not None:
+        dropped = _drop_ungrounded_evidence(data, document_text)
+        demoted = _demote_ungrounded_values(data)
+        data["_meta"] = {"dropped_evidence": dropped, "demoted_values": demoted}
 
     return data

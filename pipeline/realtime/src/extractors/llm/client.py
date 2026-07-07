@@ -23,15 +23,16 @@ def _get_client() -> OpenAI:
     return _client
 
 
-def chat_completion(system_prompt: str, user_prompt: str) -> str:
-    """system/user 메시지를 보내고 응답 텍스트(content)를 그대로 반환한다."""
+def chat_completion(messages: list[dict]) -> str:
+    """messages(멀티턴 가능)를 보내고 응답 텍스트(content)를 그대로 반환한다.
+
+    few-shot을 user/assistant 멀티턴으로 넣는 방식(prompt.build_messages)을 쓰므로
+    system/user 단일 쌍이 아니라 messages 리스트를 그대로 받는다.
+    """
     client = _get_client()
     response = client.chat.completions.create(
         model=_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=messages,
         max_tokens=8192,
         temperature=0,
         response_format={"type": "json_object"},
@@ -44,7 +45,7 @@ if __name__ == "__main__":
     #   cd pipeline/realtime/scripts && python -c "from dotenv import load_dotenv; load_dotenv('../../../.env')"
     # 처럼 .env를 먼저 로드한 뒤 `python -m extractors.llm.client`로 실행(src가 sys.path에 있어야 함).
     # 전체 파이프라인(프롬프트+스키마 검증까지) 테스트는 scripts/test_llm_extract.py 참고.
-    print(chat_completion(
-        "당신은 JSON만 답하는 테스트 어시스턴트입니다.",
-        '{"ping": "pong"} 형태로만 답하세요.',
-    ))
+    print(chat_completion([
+        {"role": "system", "content": "당신은 JSON만 답하는 테스트 어시스턴트입니다."},
+        {"role": "user", "content": '{"ping": "pong"} 형태로만 답하세요.'},
+    ]))

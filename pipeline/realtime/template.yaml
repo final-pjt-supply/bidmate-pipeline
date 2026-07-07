@@ -40,8 +40,11 @@ Parameters:
 
   LlmModel:
     Type: String
-    Default: "meta/llama-3.1-8b-instruct"
-    Description: LLM 모델 이름.
+    Default: "qwen/qwen3-next-80b-a3b-instruct"
+    Description: >
+      LLM 모델 이름. 3모델(현행 llama-3.1-8b/kimi-k2.6/qwen3-next-80b) x 4유형(물품/용역/공사/외자)
+      x 3회 라이브 테스트 결과 qwen3-next-80b-a3b-instruct 채택 — few-shot 오염 0/12,
+      joint_venture_allowed 정답률 12/12, recall이 나머지 둘보다 뚜렷하게 우수.
 
 Resources:
   # ============================================================
@@ -98,7 +101,12 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: llm-extract-queue
-      VisibilityTimeout: 720
+      # Lambda Timeout(180s)의 2배(=360s). 다른 큐들의 6배 관례보다 짧게 잡은 이유:
+      # VisibilityTimeout이 Lambda Timeout보다만 충분히 크면(정상 처리 시간은 실측 약 27초라
+      # 여유는 충분) 목적 달성 — 여기서 "충분히 크게"는 함수가 아직 정상 처리 중인데
+      # 가시성 타임아웃이 만료돼 다른 워커가 같은 메시지를 집어가는(중복 처리) 사태를
+      # 막을 정도면 되고, 6배(1080s)까지 늘릴 필요는 없다(실패 시 재시도가 그만큼 늦어질 뿐).
+      VisibilityTimeout: 360
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt LlmExtractDlq.Arn
         maxReceiveCount: 3
@@ -339,9 +347,11 @@ Resources:
             BatchSize: 1
 
   # LLM 추출 함수 — 같은 이미지 공유, CMD만 다름. NVIDIA Build API의 분당 요청 한도(40 RPM) 대비
-  # ReservedConcurrentExecutions로 동시 실행 수를 2로 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
-  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음). 실측 처리시간 약 4초/건 기준 동시성 5는
-  # 75 RPM으로 한도(40 RPM)를 초과하고, 동시성 2는 30 RPM으로 상시 한도 이하로 유지된다.
+  # ReservedConcurrentExecutions로 동시 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
+  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음). qwen3-next-80b 채택 후 실측 처리시간
+  # 약 27초/건 기준, 동시성 5 = 약 11 RPM(60s/27s * 5)으로 한도(40 RPM) 대비 충분히 안전.
+  # Timeout도 180초로 올림 — 큰 문서·모델 응답 지연 대비 여유(기존 Globals 120초로는
+  # 27초 실측 대비 안전하지만, 느린 케이스·모델 큐잉 지연을 감안해 개별 오버라이드).
   LlmExtractFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -351,7 +361,8 @@ Resources:
       ImageConfig:
         Command: ["handlers.extract_llm.lambda_handler"]
       Role: !GetAtt LlmExtractFunctionRole.Arn
-      ReservedConcurrentExecutions: 2
+      Timeout: 180
+      ReservedConcurrentExecutions: 5
       Environment:
         Variables:
           NVIDIA_API_KEY: !Ref NvidiaApiKey
@@ -363,3 +374,24 @@ Resources:
           Properties:
             Queue: !GetAtt LlmExtractQueue.Arn
             BatchSize: 1
+
+  # LlmExtractQueue 적체 감지용 — 액션 없이 콘솔 확인용(알람 상태만 봄, SNS 등 통보 없음).
+  # 15분(Period 300s x EvaluationPeriods 3) 이상 지속적으로 메시지 100개 넘게 쌓이면
+  # ReservedConcurrentExecutions=5 제한 때문에 처리가 밀리고 있다는 신호.
+  LlmExtractQueueBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: llm-extract-queue-backlog
+      AlarmDescription: >
+        LlmExtractQueue에 메시지가 15분 이상 100개를 초과해 쌓여있음(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt LlmExtractQueue.QueueName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
