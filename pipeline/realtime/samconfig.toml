@@ -6,7 +6,9 @@ resolve_s3 = true
 s3_prefix = "realtime-dev"
 confirm_changeset = true
 capabilities = "CAPABILITY_NAMED_IAM"
-parameter_overrides = "ImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest\" SourceBucketName=\"realtime-dev-ds\" LlmExtractQueueUrl=\"\" LlmExtractQueueArn=\"arn:aws:sqs:ap-northeast-2:890608337282:REPLACE-ME-llm-extract-queue\""
+# NvidiaApiKey는 여기 넣지 않는다(이 파일은 git에 커밋됨) — 배포 시
+# `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`처럼 CLI로 별도로 넘길 것.
+parameter_overrides = "ImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest\" SourceBucketName=\"realtime-dev-ds\" LlmBaseUrl=\"https://integrate.api.nvidia.com/v1\" LlmModel=\"meta/llama-3.1-8b-instruct\""
 image_repositories = []
 
 [default.global.parameters]
