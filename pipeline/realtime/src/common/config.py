@@ -4,5 +4,6 @@ import os
 
 
 def load_config() -> dict:
-    # TODO: 필요한 env 키 확정 후 채우기 (버킷명, 큐 URL 등)
-    return {}
+    return {
+        "next_queue_url": os.environ["LLM_EXTRACT_QUEUE_URL"],
+    }

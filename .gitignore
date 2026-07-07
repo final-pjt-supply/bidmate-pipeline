@@ -13,6 +13,7 @@ transforming/trans_test_optimizing_parallel.py
 
 # ── 생성·중간 데이터 (generated / intermediate) ──
 transforming/output/
+pipeline/realtime/tests/output/
 
 # ── 원본/변환 샘플 문서 (sample & converted docs) ──
 # 입력 원본과 변환 결과물은 데이터라 추적하지 않는다.
