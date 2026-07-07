@@ -221,7 +221,7 @@ Resources:
   ExtractPdfFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: extract-pdf
+      FunctionName: realtime-extract-pdf-dev
       PackageType: Image
       ImageUri: !Ref ImageUri
       ImageConfig:
@@ -240,7 +240,7 @@ Resources:
   ExtractHwpFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: extract-hwp
+      FunctionName: realtime-extract-hwp-dev
       PackageType: Image
       ImageUri: !Ref ImageUri
       ImageConfig:
@@ -259,7 +259,7 @@ Resources:
   ExtractHwpxFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: extract-hwpx
+      FunctionName: realtime-extract-hwpx-dev
       PackageType: Image
       ImageUri: !Ref ImageUri
       ImageConfig:
