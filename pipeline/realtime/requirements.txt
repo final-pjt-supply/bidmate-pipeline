@@ -7,3 +7,5 @@ pymupdf<1.25   # pdf.py가 parsing.pdf.pdf_extractor 재사용 + 스캔본 감�
                # 소스 빌드로 떨어짐. 1.24.x가 manylinux2014 휠을 배포하는 마지막 라인업.
 
 boto3   # handlers가 S3 다운로드/업로드 + SQS 전송에 사용
+
+openai   # extractors/llm/client.py가 NVIDIA Build API(OpenAI 호환)를 호출하는 데 사용

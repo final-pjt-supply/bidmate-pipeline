@@ -32,6 +32,31 @@ def raw_key_to_text_key(key: str) -> str:
     ).format(**parts)
 
 
+_TEXT_KEY_RE = re.compile(
+    r"^text_extracted/downloads/biz_div=(?P<biz_div>[^/]+)"
+    r"/(?P<stage>[^/]+)"
+    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)"
+    r"/(?P<bid_id>[^/]+)/(?P<file_id>[^/]+)\.json$"
+)
+
+
+def parse_text_key(key: str) -> dict:
+    """text_extracted key에서 biz_div/stage/year/month/day/bid_id/file_id를 꺼낸다. 형식이 다르면 ValueError."""
+    m = _TEXT_KEY_RE.match(key)
+    if m is None:
+        raise ValueError(f"text_extracted key 형식이 아님: {key}")
+    return m.groupdict()
+
+
+def text_key_to_llm_key(key: str) -> str:
+    """text_extracted key와 같은 파티션 구조로 llm_extracted 결과 key를 조립한다."""
+    parts = parse_text_key(key)
+    return (
+        "llm_extracted/downloads/biz_div={biz_div}/{stage}/year={year}/month={month}/day={day}"
+        "/{bid_id}/{file_id}.json"
+    ).format(**parts)
+
+
 def document_id_from_file_id(bid_id: str, file_id: str) -> str:
     """file_id에서 bid_id 접두어(뒤따르는 "_" 포함)를 뗀 나머지를 document_id로 반환한다.
 
