@@ -81,8 +81,8 @@ def notice_id(record, index):
 
 def s3_notice_json_key(prefix, cat, day, record, index):
     return (
-        f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
-        f"biz_div={cat}/{notice_id(record, index)}.json"
+        f"{prefix}/biz_div={cat}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        f"{notice_id(record, index)}.json"
     )
 
 

@@ -130,8 +130,8 @@ def notice_partition_dt(record, fallback_dt):
 
 def s3_json_key(prefix, cat, partition_dt, record, index):
     return (
-        f"{prefix}/year={partition_dt:%Y}/month={partition_dt:%m}/day={partition_dt:%d}/hour={partition_dt:%H}/"
-        f"biz_div={cat}/{notice_id(record, index)}.json"
+        f"{prefix}/biz_div={cat}/year={partition_dt:%Y}/month={partition_dt:%m}/day={partition_dt:%d}/hour={partition_dt:%H}/"
+        f"{notice_id(record, index)}.json"
     )
 
 

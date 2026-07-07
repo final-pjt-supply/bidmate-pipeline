@@ -138,8 +138,8 @@ def file_s3_key(
     ord_part = format_ord(metadata.get("bidNtceOrd"))
     ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url).lower()
     doc_no = int(metadata.get("docNo") or metadata.get("fileSeq") or 0)
-    partition_path = f"{prefix}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
+    partition_path = f"{prefix}/biz_div={biz_div}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
     if include_hour:
         partition_path += f"hour={notice_dt:%H}/"
 
-    return partition_path + f"biz_div={biz_div}/{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"
+    return partition_path + f"{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"

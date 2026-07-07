@@ -36,12 +36,22 @@ def s3_client():
     return boto3.client("s3")
 
 
-def date_prefixes(prefix: str, start_dt: datetime, end_dt: datetime):
+def day_suffixes(base: str, start_dt: datetime, end_dt: datetime):
     day = datetime(start_dt.year, start_dt.month, start_dt.day)
     end_day = datetime(end_dt.year, end_dt.month, end_dt.day)
     while day <= end_day:
-        yield f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        yield f"{base}year={day:%Y}/month={day:%m}/day={day:%d}/"
         day += timedelta(days=1)
+
+
+def list_biz_div_prefixes(s3, bucket: str, prefix: str):
+    """{prefix}/ 아래 biz_div=CAT/ 공통 프리픽스 목록을 반환."""
+    paginator = s3.get_paginator("list_objects_v2")
+    prefixes = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/", Delimiter="/"):
+        for cp in page.get("CommonPrefixes", []):
+            prefixes.append(cp["Prefix"])
+    return prefixes
 
 
 def iter_recent_curated(s3, bucket: str, prefix: str, start_utc: datetime, end_utc: datetime):
@@ -49,19 +59,20 @@ def iter_recent_curated(s3, bucket: str, prefix: str, start_utc: datetime, end_u
     start_local = start_utc.astimezone().replace(tzinfo=None)
     end_local = end_utc.astimezone().replace(tzinfo=None)
 
-    for day_prefix in date_prefixes(prefix, start_local, end_local):
-        for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if not key.endswith(".json"):
-                    continue
-                last_modified = obj["LastModified"]
-                if start_utc <= last_modified <= end_utc:
-                    payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
-                    records = json.loads(payload.decode("utf-8"))
-                    for record in records if isinstance(records, list) else [records]:
-                        if isinstance(record, dict):
-                            yield key, record
+    for base in list_biz_div_prefixes(s3, bucket, prefix):
+        for day_prefix in day_suffixes(base, start_local, end_local):
+            for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if not key.endswith(".json"):
+                        continue
+                    last_modified = obj["LastModified"]
+                    if start_utc <= last_modified <= end_utc:
+                        payload = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+                        records = json.loads(payload.decode("utf-8"))
+                        for record in records if isinstance(records, list) else [records]:
+                            if isinstance(record, dict):
+                                yield key, record
 
 
 def upload_attachment(
@@ -195,7 +206,6 @@ def main() -> None:
         run(parse_args())
     except Exception as exc:
         raise SystemExit(f"실패: {exc}") from None
-
 
 if __name__ == "__main__":
     main()

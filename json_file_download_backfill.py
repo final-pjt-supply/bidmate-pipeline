@@ -32,27 +32,38 @@ FILES_PREFIX = "raw/downloads/backfill"
 DEFAULT_CONCURRENCY = 8
 
 
-def date_prefixes(prefix: str, start_day: datetime, end_day: datetime):
+def day_suffixes(base: str, start_day: datetime, end_day: datetime):
     day = start_day
     while day <= end_day:
-        yield f"{prefix}/year={day:%Y}/month={day:%m}/day={day:%d}/"
+        yield f"{base}year={day:%Y}/month={day:%m}/day={day:%d}/"
         day += timedelta(days=1)
+
+
+async def list_biz_div_prefixes(s3, bucket: str, prefix: str):
+    """{prefix}/ 아래 biz_div=CAT/ 공통 프리픽스 목록을 반환."""
+    paginator = s3.get_paginator("list_objects_v2")
+    prefixes = []
+    async for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/", Delimiter="/"):
+        for cp in page.get("CommonPrefixes", []):
+            prefixes.append(cp["Prefix"])
+    return prefixes
 
 
 async def iter_curated_range(s3, bucket: str, prefix: str, start_day: datetime, end_day: datetime):
     paginator = s3.get_paginator("list_objects_v2")
-    for day_prefix in date_prefixes(prefix, start_day, end_day):
-        async for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if not key.endswith(".json"):
-                    continue
-                response = await s3.get_object(Bucket=bucket, Key=key)
-                payload = await response["Body"].read()
-                record = json.loads(payload.decode("utf-8"))
-                for item in record if isinstance(record, list) else [record]:
-                    if isinstance(item, dict):
-                        yield key, item
+    for base in await list_biz_div_prefixes(s3, bucket, prefix):
+        for day_prefix in day_suffixes(base, start_day, end_day):
+            async for page in paginator.paginate(Bucket=bucket, Prefix=day_prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if not key.endswith(".json"):
+                        continue
+                    response = await s3.get_object(Bucket=bucket, Key=key)
+                    payload = await response["Body"].read()
+                    record = json.loads(payload.decode("utf-8"))
+                    for item in record if isinstance(record, list) else [record]:
+                        if isinstance(item, dict):
+                            yield key, item
 
 
 async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int):
