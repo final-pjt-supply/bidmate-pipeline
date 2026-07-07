@@ -291,6 +291,11 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
 - DAG 설정은 `catchup=False`, `max_active_runs=1`, `retries=2`를 기본으로 둔다.
   과거 미실행 구간을 몰아서 따라잡지 않고, 이전 실행이 끝나기 전에 다음 5분 실행이
   겹치지 않게 하기 위한 선택이다.
+- Airflow Variable `bidding_daily_last_success_at`에 마지막 처리 기준 시각을 저장한다.
+  gap이 30분 이하이면 `last_success_at ~ 현재 시각`까지 수집 창을 넓혀 짧은 지연을 자동 복구한다.
+- gap이 30분을 초과하면 긴 구간은 자동 수집하지 않고
+  `raw/downloads/daily/_metadata/gaps/` 아래 manifest와 Airflow 로그에 남긴 뒤,
+  현재 실행은 다시 최근 5분 기준으로 진행한다. 이 구간은 이후 backfill로 복구한다.
 - 초기 운영에서는 daily 다운로드를 순차 처리로 유지한다. 병목이 실제로 관찰되면
   `ThreadPoolExecutor(max_workers=3~5)` 기반 제한 병렬화를 검토한다.
 - 15분 다운로드 창은 중복 다운로드 가능성을 감수하고 누락을 줄이는 단기 방안이다.
