@@ -339,8 +339,9 @@ Resources:
             BatchSize: 1
 
   # LLM 추출 함수 — 같은 이미지 공유, CMD만 다름. NVIDIA Build API의 분당 요청 한도(40 RPM) 대비
-  # ReservedConcurrentExecutions로 동시 실행 수를 5로 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
-  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음).
+  # ReservedConcurrentExecutions로 동시 실행 수를 2로 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
+  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음). 실측 처리시간 약 4초/건 기준 동시성 5는
+  # 75 RPM으로 한도(40 RPM)를 초과하고, 동시성 2는 30 RPM으로 상시 한도 이하로 유지된다.
   LlmExtractFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -350,7 +351,7 @@ Resources:
       ImageConfig:
         Command: ["handlers.extract_llm.lambda_handler"]
       Role: !GetAtt LlmExtractFunctionRole.Arn
-      ReservedConcurrentExecutions: 5
+      ReservedConcurrentExecutions: 2
       Environment:
         Variables:
           NVIDIA_API_KEY: !Ref NvidiaApiKey
