@@ -14,7 +14,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from backfill_lambda.router import extract_document
-from parsing.json_output import parse_doc_filename, to_json_doc
+from parsing.hwp_hwpx.json_output import parse_doc_filename, to_json_doc
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

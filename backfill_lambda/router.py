@@ -6,7 +6,7 @@
 import logging
 import os
 
-from parsing.contract import ExtractResult  # 타입 힌트용(읽기전용 재사용)
+from parsing.hwp_hwpx.contract import ExtractResult  # 타입 힌트용(읽기전용 재사용)
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,10 @@ def extract_document(data: bytes, filename: str, describe_fn=None) -> ExtractRes
     if fmt != ext:  # 오라벨 흔적 — 리포트↔로그 상관용 breadcrumb
         logger.info("format mismatch: filename=%s ext=%s detected=%s", filename, ext, fmt)
     if fmt == "hwpx":
-        from parsing.hwpx_extractor import extract_hwpx
+        from parsing.hwp_hwpx.hwpx_extractor import extract_hwpx
         return extract_hwpx(data, describe_fn=describe_fn)
     if fmt == "hwp":
-        from parsing.hwp_extractor import extract_hwp
+        from parsing.hwp_hwpx.hwp_extractor import extract_hwp
         return extract_hwp(data, describe_fn=describe_fn)
     if fmt == "pdf":
         from backfill_lambda.pdf_extractor import extract_pdf

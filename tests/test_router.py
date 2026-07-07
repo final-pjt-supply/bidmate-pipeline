@@ -15,7 +15,7 @@ def test_detect_format_fallback_to_extension():
 
 def test_router_oralabel_hwp_routes_to_hwpx(monkeypatch):
     called = {}
-    import parsing.hwpx_extractor as hx
+    import parsing.hwp_hwpx.hwpx_extractor as hx
     monkeypatch.setattr(hx, "extract_hwpx",
                         lambda data, describe_fn=None: called.setdefault("fn", "hwpx"))
     router.extract_document(b"PK\x03\x04xxxx", "R26_000_doc01.hwp")
