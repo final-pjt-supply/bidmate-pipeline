@@ -46,7 +46,7 @@ def parse_raw_key(key: str) -> dict:
     return m.groupdict()
 
 
-def raw_key_to_text_key(key: str) -> str:
+def raw_key_to_extracted_key(key: str) -> str:
     """raw key에서 downloads/를 뺀 나머지 파티션으로 extracted(텍스트 추출) 결과 key를 조립한다(확장자만 .json)."""
     parts = parse_raw_key(key)
     return (
@@ -56,7 +56,7 @@ def raw_key_to_text_key(key: str) -> str:
     ).format(prefix=EXTRACTED_PREFIX, **parts)
 
 
-_TEXT_KEY_RE = re.compile(
+_EXTRACTED_KEY_RE = re.compile(
     rf"^{re.escape(EXTRACTED_PREFIX)}/(?P<stage>[^/]+)"
     r"/biz_div=(?P<biz_div>[^/]+)"
     r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)/hour=(?P<hour>[^/]+)"
@@ -64,17 +64,17 @@ _TEXT_KEY_RE = re.compile(
 )
 
 
-def parse_text_key(key: str) -> dict:
+def parse_extracted_key(key: str) -> dict:
     """extracted(텍스트 추출) key에서 stage/biz_div/year/month/day/hour/bid_id/file_id를 꺼낸다. 형식이 다르면 ValueError."""
-    m = _TEXT_KEY_RE.match(key)
+    m = _EXTRACTED_KEY_RE.match(key)
     if m is None:
         raise ValueError(f"{EXTRACTED_PREFIX} key 형식이 아님: {key}")
     return m.groupdict()
 
 
-def text_key_to_llm_key(key: str) -> str:
+def extracted_key_to_qualifications_key(key: str) -> str:
     """extracted key와 같은 파티션 구조로 첫 토큰만 qualifications(LLM 자격요건)로 바꿔 결과 key를 조립한다."""
-    parts = parse_text_key(key)
+    parts = parse_extracted_key(key)
     return (
         "{prefix}/{stage}/biz_div={biz_div}"
         "/year={year}/month={month}/day={day}/hour={hour}"

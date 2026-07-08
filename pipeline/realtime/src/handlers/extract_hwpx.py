@@ -24,9 +24,9 @@ def _process(bucket: str, key: str) -> None:
         extracted = hwpx.extract(raw_bytes)
         result = build_result(bid_id, document_id, extracted["pages"])
 
-        text_key = paths.raw_key_to_text_key(key)
-        s3.put_object(bucket, text_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
-        sqs.send_to_next_queue({"bucket": bucket, "key": text_key})
+        extracted_key = paths.raw_key_to_extracted_key(key)
+        s3.put_object(bucket, extracted_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        sqs.send_to_next_queue({"bucket": bucket, "key": extracted_key})
     except Exception:
         logger.exception(
             "HWPX 추출 실패: bucket=%s key=%s bid_id=%s document_id=%s",
