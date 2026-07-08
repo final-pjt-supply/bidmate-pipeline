@@ -1,0 +1,54 @@
+# pdf/hwp/hwpx 텍스트 추출 Lambda 3개가 공유하는 이미지 (llm 추출은 Dockerfile.llm로 분리).
+# 빌드는 리포 루트에서:
+#   docker build --provenance=false --sbom=false -f pipeline/realtime/Dockerfile.extractor -t bidding-agent-extractor .
+# (extractors가 리포 루트의 parsing/ 패키지를 그대로 재사용하므로 컨텍스트가 리포 루트여야 함)
+# ⚠ --provenance=false --sbom=false 필수: 이거 없이 빌드하면 Docker BuildKit이 기본으로
+# OCI image index(멀티플랫폼 매니페스트 리스트 + attestation 서브매니페스트)를 만드는데,
+# Lambda는 이 포맷을 지원 안 하고 단일 Docker V2 Schema2 매니페스트만 받는다(실제로
+# 이 플래그 없이 배포했다가 "image manifest ... media type ... not supported" 에러로
+# 배포가 롤백된 적 있음).
+FROM public.ecr.aws/lambda/python:3.12
+# Python 3.12 선택 근거: 이 base(3.12/3.13 둘 다) 자체가 이미 Amazon Linux 2023
+# (glibc 2.34)이라 pymupdf 최신판이 요구하는 manylinux_2_28(glibc>=2.28) wheel이
+# 둘 다 그대로 설치됨 — 옛 Dockerfile의 pymupdf<1.25 제약(AL2, glibc 2.26)은
+# 이 base에선 애초에 해당 없음. lxml도 둘 다 wheel 설치, pyhwp는 둘 다 wheel이
+# 없어 소스 빌드지만(컴파일러 불필요 — 아래 참고) 결과가 동일해서 pymupdf/lxml/pyhwp
+# 호환성만으로는 3.12/3.13 사이에 차이가 없다. 이 이미지가 물고 있는 pyhwp가
+# 0.1b15(베타)라 상대적으로 더 오래 실사용된 3.12 쪽을 골라 리스크를 낮췄다.
+#
+# ⚠ gcc/libxml2-devel 등 컴파일 도구를 별도로 안 깐다: 실제로 설치해보니(빈 base
+# 이미지에 gcc가 아예 없는 상태에서) pymupdf/lxml은 wheel로 받아지고, pyhwp는
+# 소스(sdist)에서 pyproject.toml 빌드가 컴파일러 없이도 성공했다(순수 파이썬
+# 패키지라 C 확장이 없음) — 옛 Dockerfile의 "혹시 소스 빌드로 떨어지면" 대비용
+# yum install은 이 base+버전 조합에선 불필요함을 확인함.
+
+COPY pipeline/realtime/requirements-extractor.txt /tmp/requirements-extractor.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-extractor.txt
+
+# parsing/: extractors/pdf.py, hwp.py, hwpx.py가 import하는 것만 선별 카피
+# (parsing/pdf/pdf_image_describer.py, pipeline.py 등 나머지는 우리 extractors가 안 씀).
+COPY parsing/__init__.py ${LAMBDA_TASK_ROOT}/parsing/__init__.py
+COPY parsing/pdf/__init__.py ${LAMBDA_TASK_ROOT}/parsing/pdf/__init__.py
+COPY parsing/pdf/pdf_extractor.py ${LAMBDA_TASK_ROOT}/parsing/pdf/pdf_extractor.py
+COPY parsing/hwp_hwpx/__init__.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/__init__.py
+COPY parsing/hwp_hwpx/contract.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/contract.py
+COPY parsing/hwp_hwpx/common.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/common.py
+COPY parsing/hwp_hwpx/hwp_extractor.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/hwp_extractor.py
+COPY parsing/hwp_hwpx/hwpx_extractor.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/hwpx_extractor.py
+COPY parsing/hwp_hwpx/json_output.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/json_output.py
+
+# common/: config, paths, result, s3, sqs — pdf/hwp/hwpx handler 3개가 공유.
+COPY pipeline/realtime/src/common/ ${LAMBDA_TASK_ROOT}/common/
+# extractors/: llm 서브패키지 제외(별도 이미지 Dockerfile.llm 소관).
+COPY pipeline/realtime/src/extractors/__init__.py ${LAMBDA_TASK_ROOT}/extractors/__init__.py
+COPY pipeline/realtime/src/extractors/base.py ${LAMBDA_TASK_ROOT}/extractors/base.py
+COPY pipeline/realtime/src/extractors/pdf.py ${LAMBDA_TASK_ROOT}/extractors/pdf.py
+COPY pipeline/realtime/src/extractors/hwp.py ${LAMBDA_TASK_ROOT}/extractors/hwp.py
+COPY pipeline/realtime/src/extractors/hwpx.py ${LAMBDA_TASK_ROOT}/extractors/hwpx.py
+# handlers/: extract_pdf/hwp/hwpx만(extract_llm.py는 Dockerfile.llm 소관).
+COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
+COPY pipeline/realtime/src/handlers/extract_pdf.py ${LAMBDA_TASK_ROOT}/handlers/extract_pdf.py
+COPY pipeline/realtime/src/handlers/extract_hwp.py ${LAMBDA_TASK_ROOT}/handlers/extract_hwp.py
+COPY pipeline/realtime/src/handlers/extract_hwpx.py ${LAMBDA_TASK_ROOT}/handlers/extract_hwpx.py
+
+# CMD 없음 — pdf/hwp/hwpx 3개 Lambda 함수가 생성 시 ImageConfig.Command로 각자 지정.

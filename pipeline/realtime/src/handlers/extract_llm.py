@@ -6,7 +6,7 @@
 import json
 import logging
 
-from common import db, paths, s3, sqs
+from common import paths, s3, sqs
 from extractors.llm import extractor
 
 logger = logging.getLogger(__name__)
@@ -34,5 +34,4 @@ def _process(bucket: str, key: str) -> None:
             "LLM 자격요건 추출 실패: bucket=%s key=%s bid_id=%s document_id=%s",
             bucket, key, bid_id, document_id,
         )
-        db.mark_attachment_failed(bid_id, document_id)
         raise

@@ -1,32 +1,28 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  실시간 입찰공고 문서 처리 파이프라인.
-  S3 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → Lambda 텍스트 추출.
-  S3 이벤트 알림(원본 버킷 → 큐 라우팅)은 이 template 밖에서 배포 후 별도 설정한다
-  (bidmate 버킷이 SAM 스택 밖에서 이미 만들어져 있고, 다른 팀원 소유의 읽기전용
-  원본 버킷임 — 실키 구조는 raw/downloads/daily/biz_div={업종}/year=/month=/day=/hour=/...).
-
-Globals:
-  Function:
-    Timeout: 120       # 큰 PDF 대비 여유 있게
-    MemorySize: 1024
+  실시간 입찰공고 문서 처리 파이프라인 (2026-07-08 재구축).
+  S3(bidmate) 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → 추출 Lambda 3개
+  → extracted/ 저장 + LLM 큐로 직접 메시지 → LLM Lambda → qualifications/ 저장.
+  Step Functions는 쓰지 않는다 — 전부 SQS 메시지 체이닝으로 연결.
+  S3 이벤트 알림 자체는 이 template 밖에서 별도 스크립트(scripts/setup-s3-events.ps1)로
+  설정한다(이 배포엔 포함 안 함).
 
 Parameters:
-  ImageUri:
+  ExtractorImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest
-    Description: >
-      이미 ECR에 push된 추출기 이미지. SAM이 새로 빌드하지 않고 이 이미지를 그대로 참조한다
-      (pdf/hwp/hwpx 3개 함수가 이미지 하나를 공유하고 ImageConfig.Command만 다르게 오버라이드).
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor:latest
+    Description: pdf/hwp/hwpx 추출 Lambda 3개가 공유하는 이미지(ECR). CMD만 함수별로 다르게 오버라이드.
+
+  LlmImageUri:
+    Type: String
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm:latest
+    Description: LLM 자격요건 추출 Lambda 전용 이미지(ECR). CMD가 이미지에 이미 내장돼 있어 오버라이드 안 함.
 
   SourceBucketName:
     Type: String
     Default: bidmate
-    Description: >
-      raw/extracted/qualifications가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된
-      버킷(다른 팀원 소유, 원본은 읽기전용)이라 이름만 참조. 같은 AWS 계정(890608337282)
-      소속으로 확인함 — 다른 계정이면 아래 IAM 정책이 그대로 안 먹을 수 있음.
+    Description: raw/extracted/qualifications가 있는 S3 버킷. 다른 팀원 소유, 원본(raw)은 읽기전용.
 
   NvidiaApiKey:
     Type: String
@@ -45,85 +41,83 @@ Parameters:
   LlmModel:
     Type: String
     Default: "qwen/qwen3-next-80b-a3b-instruct"
-    Description: >
-      LLM 모델 이름. 3모델(현행 llama-3.1-8b/kimi-k2.6/qwen3-next-80b) x 4유형(물품/용역/공사/외자)
-      x 3회 라이브 테스트 결과 qwen3-next-80b-a3b-instruct 채택 — few-shot 오염 0/12,
-      joint_venture_allowed 정답률 12/12, recall이 나머지 둘보다 뚜렷하게 우수.
+    Description: LLM 모델 이름.
 
 Resources:
   # ============================================================
-  # SQS — 메인 큐 3개 + DLQ 3개 (maxReceiveCount 3회 초과 시 DLQ로 이동)
+  # SQS — 4쌍(본큐+DLQ), 전부 Standard 큐.
   # ============================================================
-  ExtractPdfDlq:
+  RealtimeExtractPdfDlq:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-pdf-queue-dlq
+      QueueName: realtime-extract-pdf-queue-dlq
+      MessageRetentionPeriod: 1209600   # 14일
 
-  ExtractPdfQueue:
+  RealtimeExtractPdfQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-pdf-queue
+      QueueName: realtime-extract-pdf-queue
       VisibilityTimeout: 720   # Lambda Timeout(120s)의 6배 — AWS 권장값
       RedrivePolicy:
-        deadLetterTargetArn: !GetAtt ExtractPdfDlq.Arn
+        deadLetterTargetArn: !GetAtt RealtimeExtractPdfDlq.Arn
         maxReceiveCount: 3
 
-  ExtractHwpDlq:
+  RealtimeExtractHwpDlq:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-hwp-queue-dlq
+      QueueName: realtime-extract-hwp-queue-dlq
+      MessageRetentionPeriod: 1209600
 
-  ExtractHwpQueue:
+  RealtimeExtractHwpQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-hwp-queue
+      QueueName: realtime-extract-hwp-queue
       VisibilityTimeout: 720
       RedrivePolicy:
-        deadLetterTargetArn: !GetAtt ExtractHwpDlq.Arn
+        deadLetterTargetArn: !GetAtt RealtimeExtractHwpDlq.Arn
         maxReceiveCount: 3
 
-  ExtractHwpxDlq:
+  RealtimeExtractHwpxDlq:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-hwpx-queue-dlq
+      QueueName: realtime-extract-hwpx-queue-dlq
+      MessageRetentionPeriod: 1209600
 
-  ExtractHwpxQueue:
+  RealtimeExtractHwpxQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: extract-hwpx-queue
+      QueueName: realtime-extract-hwpx-queue
       VisibilityTimeout: 720
       RedrivePolicy:
-        deadLetterTargetArn: !GetAtt ExtractHwpxDlq.Arn
+        deadLetterTargetArn: !GetAtt RealtimeExtractHwpxDlq.Arn
         maxReceiveCount: 3
 
-  LlmExtractDlq:
+  RealtimeLlmExtractDlq:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: llm-extract-queue-dlq
+      QueueName: realtime-llm-extract-queue-dlq
+      MessageRetentionPeriod: 1209600
 
-  LlmExtractQueue:
+  RealtimeLlmExtractQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: llm-extract-queue
+      QueueName: realtime-llm-extract-queue
       # Lambda Timeout(180s)의 2배(=360s). 다른 큐들의 6배 관례보다 짧게 잡은 이유:
-      # VisibilityTimeout이 Lambda Timeout보다만 충분히 크면(정상 처리 시간은 실측 약 27초라
-      # 여유는 충분) 목적 달성 — 여기서 "충분히 크게"는 함수가 아직 정상 처리 중인데
-      # 가시성 타임아웃이 만료돼 다른 워커가 같은 메시지를 집어가는(중복 처리) 사태를
-      # 막을 정도면 되고, 6배(1080s)까지 늘릴 필요는 없다(실패 시 재시도가 그만큼 늦어질 뿐).
+      # VisibilityTimeout이 Lambda Timeout보다만 충분히 크면(정상 처리 시간은 실측 약
+      # 27초라 여유는 충분) 목적 달성 — 가시성 타임아웃 만료로 다른 워커가 같은
+      # 메시지를 집어가는(중복 처리) 사태만 막으면 되고, 6배(1080s)까지 늘릴 필요는 없다.
       VisibilityTimeout: 360
       RedrivePolicy:
-        deadLetterTargetArn: !GetAtt LlmExtractDlq.Arn
+        deadLetterTargetArn: !GetAtt RealtimeLlmExtractDlq.Arn
         maxReceiveCount: 3
 
   # ============================================================
-  # IAM — 함수별 실행 역할.
-  # 셋 다 동일한 패턴(S3 읽기 raw/downloads/daily/*, S3 쓰기 extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
-  # "자기 큐" 수신 권한이 함수마다 다른 큐로 스코프돼야 해서 역할을 3개로 분리했다.
+  # IAM — 함수별 실행 역할, 최소권한.
   # ============================================================
-  ExtractPdfFunctionRole:
+  RealtimeExtractPdfFunctionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: extract-pdf-function-role
+      RoleName: realtime-extract-pdf-function-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -132,25 +126,21 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        # CloudWatch Logs 기본 쓰기 권한 (Lambda 실행 로그)
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: extract-pdf-s3-access
+        - PolicyName: realtime-extract-pdf-s3-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
-                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
-                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
-              - Sid: WriteExtractedText
+              - Sid: WriteExtracted
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
-        - PolicyName: extract-pdf-sqs-access
+        - PolicyName: realtime-extract-pdf-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -160,16 +150,16 @@ Resources:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
-                Resource: !GetAtt ExtractPdfQueue.Arn
-              - Sid: SendToNextQueue
+                Resource: !GetAtt RealtimeExtractPdfQueue.Arn
+              - Sid: SendToLlmQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !GetAtt LlmExtractQueue.Arn
+                Resource: !GetAtt RealtimeLlmExtractQueue.Arn
 
-  ExtractHwpFunctionRole:
+  RealtimeExtractHwpFunctionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: extract-hwp-function-role
+      RoleName: realtime-extract-hwp-function-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -180,22 +170,19 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: extract-hwp-s3-access
+        - PolicyName: realtime-extract-hwp-s3-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
-                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
-                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
-              - Sid: WriteExtractedText
+              - Sid: WriteExtracted
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
-        - PolicyName: extract-hwp-sqs-access
+        - PolicyName: realtime-extract-hwp-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -205,16 +192,16 @@ Resources:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
-                Resource: !GetAtt ExtractHwpQueue.Arn
-              - Sid: SendToNextQueue
+                Resource: !GetAtt RealtimeExtractHwpQueue.Arn
+              - Sid: SendToLlmQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !GetAtt LlmExtractQueue.Arn
+                Resource: !GetAtt RealtimeLlmExtractQueue.Arn
 
-  ExtractHwpxFunctionRole:
+  RealtimeExtractHwpxFunctionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: extract-hwpx-function-role
+      RoleName: realtime-extract-hwpx-function-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -225,22 +212,19 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: extract-hwpx-s3-access
+        - PolicyName: realtime-extract-hwpx-s3-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
-                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
-                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
-              - Sid: WriteExtractedText
+              - Sid: WriteExtracted
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
-        - PolicyName: extract-hwpx-sqs-access
+        - PolicyName: realtime-extract-hwpx-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -250,21 +234,17 @@ Resources:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
-                Resource: !GetAtt ExtractHwpxQueue.Arn
-              - Sid: SendToNextQueue
+                Resource: !GetAtt RealtimeExtractHwpxQueue.Arn
+              - Sid: SendToLlmQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !GetAtt LlmExtractQueue.Arn
+                Resource: !GetAtt RealtimeLlmExtractQueue.Arn
 
-  # LLM 추출 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다
-  # (S3 읽기 대상도 raw/*가 아니라 extracted/*, 쓰기 대상은 qualifications/*로 다름).
-  # ⚠ "extracted"/"qualifications" 리터럴은 common/paths.py의 EXTRACTED_PREFIX/
-  # QUALIFICATIONS_PREFIX 상수와 반드시 같아야 한다(2026-07-08 팀 명명 확정 —
-  # extracted는 backfill_lambda 선례와 통일, qualifications는 구 llm_extracted).
-  LlmExtractFunctionRole:
+  # LLM 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다.
+  RealtimeLlmExtractFunctionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: llm-extract-function-role
+      RoleName: realtime-llm-extract-function-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -275,19 +255,19 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: llm-extract-s3-access
+        - PolicyName: realtime-llm-extract-s3-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: ReadExtractedText
+              - Sid: ReadExtracted
                 Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
-              - Sid: WriteLlmExtracted
+              - Sid: WriteQualifications
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/qualifications/*"
-        - PolicyName: llm-extract-sqs-access
+        - PolicyName: realtime-llm-extract-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -297,87 +277,90 @@ Resources:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
-                Resource: !GetAtt LlmExtractQueue.Arn
+                Resource: !GetAtt RealtimeLlmExtractQueue.Arn
 
   # ============================================================
-  # Lambda — 3개 함수, 이미지 1개 공유(ImageUri 동일) + ImageConfig.Command만 다르게.
-  # 각각 대응하는 큐를 SQS 트리거로 연결. BatchSize=1: handler가 배치 내 실패를 개별
-  # 처리하지 않고 예외 하나로 전체를 재시도시키므로(코드 참고: src/handlers/*), 한 번에
-  # 메시지 1개씩만 받아야 실패한 메시지만 정확히 재시도/DLQ된다.
+  # Lambda — pdf/hwp/hwpx 3개는 이미지 1개 공유(ExtractorImageUri) + CMD만 다르게.
+  # LLM 1개는 별도 이미지(LlmImageUri, CMD 내장). 각각 대응 큐를 SQS 트리거로 연결.
+  # BatchSize=1: handler가 배치 내 실패를 개별 처리하지 않고 예외 하나로 전체를
+  # 재시도시키므로, 한 번에 메시지 1개씩만 받아야 실패한 메시지만 정확히 재시도/DLQ된다.
   # ============================================================
-  ExtractPdfFunction:
+  RealtimeExtractPdfFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: realtime-extract-pdf-dev
       PackageType: Image
-      ImageUri: !Ref ImageUri
+      ImageUri: !Ref ExtractorImageUri
       ImageConfig:
         Command: ["handlers.extract_pdf.lambda_handler"]
-      Role: !GetAtt ExtractPdfFunctionRole.Arn
+      Role: !GetAtt RealtimeExtractPdfFunctionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
+          LLM_EXTRACT_QUEUE_URL: !Ref RealtimeLlmExtractQueue
       Events:
         PdfQueueEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt ExtractPdfQueue.Arn
+            Queue: !GetAtt RealtimeExtractPdfQueue.Arn
             BatchSize: 1
 
-  ExtractHwpFunction:
+  RealtimeExtractHwpFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: realtime-extract-hwp-dev
       PackageType: Image
-      ImageUri: !Ref ImageUri
+      ImageUri: !Ref ExtractorImageUri
       ImageConfig:
         Command: ["handlers.extract_hwp.lambda_handler"]
-      Role: !GetAtt ExtractHwpFunctionRole.Arn
+      Role: !GetAtt RealtimeExtractHwpFunctionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
+          LLM_EXTRACT_QUEUE_URL: !Ref RealtimeLlmExtractQueue
       Events:
         HwpQueueEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt ExtractHwpQueue.Arn
+            Queue: !GetAtt RealtimeExtractHwpQueue.Arn
             BatchSize: 1
 
-  ExtractHwpxFunction:
+  RealtimeExtractHwpxFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: realtime-extract-hwpx-dev
       PackageType: Image
-      ImageUri: !Ref ImageUri
+      ImageUri: !Ref ExtractorImageUri
       ImageConfig:
         Command: ["handlers.extract_hwpx.lambda_handler"]
-      Role: !GetAtt ExtractHwpxFunctionRole.Arn
+      Role: !GetAtt RealtimeExtractHwpxFunctionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
+          LLM_EXTRACT_QUEUE_URL: !Ref RealtimeLlmExtractQueue
       Events:
         HwpxQueueEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt ExtractHwpxQueue.Arn
+            Queue: !GetAtt RealtimeExtractHwpxQueue.Arn
             BatchSize: 1
 
-  # LLM 추출 함수 — 같은 이미지 공유, CMD만 다름. NVIDIA Build API의 분당 요청 한도(40 RPM) 대비
-  # ReservedConcurrentExecutions로 동시 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
-  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음). qwen3-next-80b 채택 후 실측 처리시간
-  # 약 27초/건 기준, 동시성 5 = 약 11 RPM(60s/27s * 5)으로 한도(40 RPM) 대비 충분히 안전.
-  # Timeout도 180초로 올림 — 큰 문서·모델 응답 지연 대비 여유(기존 Globals 120초로는
-  # 27초 실측 대비 안전하지만, 느린 케이스·모델 큐잉 지연을 감안해 개별 오버라이드).
-  LlmExtractFunction:
+  # NVIDIA Build API의 분당 요청 한도(40 RPM) 대비 ReservedConcurrentExecutions로 동시
+  # 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼 동시에 확장해서 순식간에 RPM을
+  # 초과시킬 수 있음). qwen3-next-80b 기준 실측 처리시간 약 27초/건, 동시성 5 = 약
+  # 11 RPM(60s/27s * 5)으로 한도(40 RPM) 대비 충분히 안전.
+  RealtimeLlmExtractFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: realtime-extract-llm-dev
+      FunctionName: realtime-llm-extract-dev
       PackageType: Image
-      ImageUri: !Ref ImageUri
-      ImageConfig:
-        Command: ["handlers.extract_llm.lambda_handler"]
-      Role: !GetAtt LlmExtractFunctionRole.Arn
+      ImageUri: !Ref LlmImageUri
+      Role: !GetAtt RealtimeLlmExtractFunctionRole.Arn
       Timeout: 180
+      MemorySize: 1024
       ReservedConcurrentExecutions: 5
       Environment:
         Variables:
@@ -388,26 +371,96 @@ Resources:
         LlmQueueEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt LlmExtractQueue.Arn
+            Queue: !GetAtt RealtimeLlmExtractQueue.Arn
             BatchSize: 1
 
-  # LlmExtractQueue 적체 감지용 — 액션 없이 콘솔 확인용(알람 상태만 봄, SNS 등 통보 없음).
-  # 15분(Period 300s x EvaluationPeriods 3) 이상 지속적으로 메시지 100개 넘게 쌓이면
-  # ReservedConcurrentExecutions=5 제한 때문에 처리가 밀리고 있다는 신호.
-  LlmExtractQueueBacklogAlarm:
+  # ============================================================
+  # CloudWatch 알람 — 전부 콘솔 확인용(AlarmActions 없음, 통보 없음).
+  # ============================================================
+  RealtimeLlmExtractQueueBacklogAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: llm-extract-queue-backlog
+      AlarmName: realtime-llm-extract-queue-backlog
       AlarmDescription: >
-        LlmExtractQueue에 메시지가 15분 이상 100개를 초과해 쌓여있음(콘솔 확인용, 액션 없음).
+        realtime-llm-extract-queue에 메시지가 15분 이상 100개를 초과해 쌓여있음
+        (콘솔 확인용, 액션 없음). ReservedConcurrentExecutions=5 제한 때문에
+        처리가 밀리고 있다는 신호.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
         - Name: QueueName
-          Value: !GetAtt LlmExtractQueue.QueueName
+          Value: !GetAtt RealtimeLlmExtractQueue.QueueName
       Statistic: Average
       Period: 300
       EvaluationPeriods: 3
       Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  RealtimeExtractPdfDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-extract-pdf-queue-dlq-has-messages
+      AlarmDescription: realtime-extract-pdf-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeExtractPdfDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  RealtimeExtractHwpDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-extract-hwp-queue-dlq-has-messages
+      AlarmDescription: realtime-extract-hwp-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeExtractHwpDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  RealtimeExtractHwpxDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-extract-hwpx-queue-dlq-has-messages
+      AlarmDescription: realtime-extract-hwpx-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeExtractHwpxDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  RealtimeLlmExtractDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-llm-extract-queue-dlq-has-messages
+      AlarmDescription: realtime-llm-extract-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeLlmExtractDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
