@@ -1,0 +1,28 @@
+# 로컬 개발용 PostgreSQL.
+#
+# 실행: db/ 에서 `docker compose up -d`
+#
+# ⚠ 스키마 변경 시 반드시 `docker compose down -v` 후 다시 `up -d`할 것.
+#   초기화 스크립트(./schema/*.sql)는 volume이 비어있는 "최초 기동" 시에만 실행된다.
+#   기존 volume이 남아있으면 -v 없이 up 해도 새 스키마가 반영되지 않는다.
+#
+# 값은 .env(리포 루트)의 POSTGRES_* 기본값과 동일하게 맞춰뒀다.
+services:
+  postgres:
+    image: postgres:16
+    container_name: bidding-agent-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: bidding_agent
+      POSTGRES_USER: bidding_agent
+      POSTGRES_PASSWORD: bidding_agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # schema/ 안의 *.sql이 파일명 순서대로 실행됨 — 01_bid_table.sql이 FK 대상이라 먼저 실행되게
+      # 번호를 접두어로 붙여뒀다(접두어 없으면 알파벳 순 "bid_attachments" < "bid_table"로 뒤집힘).
+      - ./schema:/docker-entrypoint-initdb.d:ro
+
+volumes:
+  pgdata:
