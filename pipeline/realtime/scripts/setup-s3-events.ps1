@@ -1,19 +1,23 @@
 ﻿<#
 .SYNOPSIS
-    realtime-dev-ds 버킷의 S3 이벤트 알림(raw/downloads/biz_div={업종}/realtime/ → SQS 3개)과
+    bidmate 버킷의 S3 이벤트 알림(raw/downloads/daily/biz_div={업종}/ → SQS 3개)과
     각 큐의 "S3가 SendMessage 하도록 허용"하는 리소스 정책을 설정한다.
 
 .DESCRIPTION
     ① 큐 3개(extract-pdf-queue / extract-hwp-queue / extract-hwpx-queue)에
-       S3(realtime-dev-ds 버킷)가 SendMessage 할 수 있도록 허용하는 정책을 붙인다.
+       S3(bidmate 버킷)가 SendMessage 할 수 있도록 허용하는 정책을 붙인다.
        (S3가 버킷 알림을 큐로 보내려면 이 정책이 먼저 있어야 함 — 없으면 ②에서 실패)
-    ② 버킷 realtime-dev-ds에 이벤트 알림을 설정한다.
-       key 구조가 raw/downloads/biz_div={업종}/{stage}/year=/month=/day=/... 라서
-       (biz_div가 stage보다 앞) realtime만 트리거하려면 biz_div 값마다 규칙을 따로
+    ② 버킷 bidmate에 이벤트 알림을 설정한다.
+       key 구조가 raw/downloads/{stage}/biz_div={업종}/year=/month=/day=/hour=/... 라서
+       (stage가 biz_div보다 앞 — 테스트 버킷 realtime-dev-ds와 반대 순서) daily(우리
+       realtime 파이프라인이 처리하는 stage)만 트리거하려면 biz_div 값마다 규칙을 따로
        만들어야 한다. biz_div 4종(thng/servc/cnstwk/frgcpt) × 큐 3개 = 12개 규칙을
-       prefix=raw/downloads/biz_div={업종}/realtime/ 로 생성하고, 확장자(suffix)로
-       .pdf/.hwp/.hwpx를 각각 다른 큐로 라우팅한다. backfill(raw/.../backfill/)은
-       prefix에 안 걸려서 트리거되지 않는다.
+       prefix=raw/downloads/daily/biz_div={업종}/ 로 생성하고, 확장자(suffix)로
+       .pdf/.hwp/.hwpx를 각각 다른 큐로 라우팅한다.
+       이 prefix는 raw/downloads/daily/biz_div={업종}/ 로 시작하는 것만 걸리므로
+       raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
+       (별도 파이프라인인 backfill_lambda 소관), raw/downloads/daily/_metadata/
+       (다운로드 매니페스트 JSON)는 전부 구조적으로 안 걸린다.
 
     ⚠ put-bucket-notification-configuration은 버킷의 알림 설정 "전체"를 교체한다.
       이 12개 규칙 외에 다른 알림이 버킷에 이미 설정돼 있다면 이 스크립트 실행 후 사라진다.
@@ -27,14 +31,14 @@
 
 .EXAMPLE
     ./setup-s3-events.ps1
-    ./setup-s3-events.ps1 -Bucket realtime-dev-ds -Region ap-northeast-2
+    ./setup-s3-events.ps1 -Bucket bidmate -Region ap-northeast-2
 #>
 
 param(
     [string]$Region   = "ap-northeast-2",
     [string]$Account  = "890608337282",
-    [string]$Bucket   = "realtime-dev-ds",
-    [string]$Stage    = "realtime",
+    [string]$Bucket   = "bidmate",
+    [string]$Stage    = "daily",
     [string[]]$BizDivs = @("thng", "servc", "cnstwk", "frgcpt")
 )
 
@@ -111,6 +115,7 @@ foreach ($q in $queues) {
 # ============================================================
 # ② S3 버킷 이벤트 알림 설정
 #    biz_div 4종 × 큐 3개 = 규칙 12개. prefix가 biz_div마다 달라야 해서 이중 순회.
+#    prefix 순서 주의: raw/downloads/{stage}/biz_div={업종}/ (stage가 biz_div보다 앞).
 # ============================================================
 $notificationConfig = @{
     QueueConfigurations = foreach ($biz in $BizDivs) {
@@ -122,7 +127,7 @@ $notificationConfig = @{
                 Filter   = @{
                     Key = @{
                         FilterRules = @(
-                            @{ Name = "prefix"; Value = "raw/downloads/biz_div=$biz/$Stage/" }
+                            @{ Name = "prefix"; Value = "raw/downloads/$Stage/biz_div=$biz/" }
                             @{ Name = "suffix"; Value = $q.Suffix }
                         )
                     }

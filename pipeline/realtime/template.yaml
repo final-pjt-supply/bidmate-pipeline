@@ -4,7 +4,8 @@ Description: >
   실시간 입찰공고 문서 처리 파이프라인.
   S3 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → Lambda 텍스트 추출.
   S3 이벤트 알림(원본 버킷 → 큐 라우팅)은 이 template 밖에서 배포 후 별도 설정한다
-  (realtime-dev-ds 버킷이 SAM 스택 밖에서 이미 만들어져 있음).
+  (bidmate 버킷이 SAM 스택 밖에서 이미 만들어져 있고, 다른 팀원 소유의 읽기전용
+  원본 버킷임 — 실키 구조는 raw/downloads/daily/biz_div={업종}/year=/month=/day=/hour=/...).
 
 Globals:
   Function:
@@ -21,8 +22,11 @@ Parameters:
 
   SourceBucketName:
     Type: String
-    Default: realtime-dev-ds
-    Description: raw/text_extracted가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된 버킷이라 이름만 참조.
+    Default: bidmate
+    Description: >
+      raw/text_extracted/llm_extracted가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된
+      버킷(다른 팀원 소유, 원본은 읽기전용)이라 이름만 참조. 같은 AWS 계정(890608337282)
+      소속으로 확인함 — 다른 계정이면 아래 IAM 정책이 그대로 안 먹을 수 있음.
 
   NvidiaApiKey:
     Type: String
@@ -113,7 +117,7 @@ Resources:
 
   # ============================================================
   # IAM — 함수별 실행 역할.
-  # 셋 다 동일한 패턴(S3 읽기 raw/*, S3 쓰기 text_extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
+  # 셋 다 동일한 패턴(S3 읽기 raw/downloads/daily/*, S3 쓰기 text_extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
   # "자기 큐" 수신 권한이 함수마다 다른 큐로 스코프돼야 해서 역할을 3개로 분리했다.
   # ============================================================
   ExtractPdfFunctionRole:
@@ -138,7 +142,10 @@ Resources:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
+                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
+                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
@@ -180,7 +187,10 @@ Resources:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
+                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
+                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
@@ -222,7 +232,10 @@ Resources:
               - Sid: ReadRawDocuments
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/*"
+                # raw/* 전체가 아니라 raw/downloads/daily/*로 스코프 제한 — bidmate엔
+                # raw/raw/, raw/curated/(공고 메타데이터, 첨부파일 아님), raw/downloads/backfill/
+                # (별도 파이프라인 backfill_lambda 소관)도 있어서 최소권한으로 좁힘.
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/downloads/daily/*"
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
@@ -245,6 +258,9 @@ Resources:
 
   # LLM 추출 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다
   # (S3 읽기 대상도 raw/*가 아니라 text_extracted/*, 쓰기 대상은 llm_extracted/*로 다름).
+  # ⚠ "text_extracted"/"llm_extracted" 리터럴은 common/paths.py의 TEXT_EXTRACTED_PREFIX/
+  # LLM_EXTRACTED_PREFIX 상수와 반드시 같아야 한다. backfill_lambda 쪽 "extracted/" 명명과
+  # 통일하기로 하면(팀 논의 중) 여기 전부와 paths.py 상수를 같이 바꿔야 함.
   LlmExtractFunctionRole:
     Type: AWS::IAM::Role
     Properties:
