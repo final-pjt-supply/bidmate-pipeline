@@ -24,15 +24,27 @@ Parameters:
     Default: realtime-dev-ds
     Description: raw/text_extracted가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된 버킷이라 이름만 참조.
 
-  LlmExtractQueueUrl:
+  NvidiaApiKey:
     Type: String
+    NoEcho: true
     Default: ""
-    Description: "PLACEHOLDER — 다음 단계(LLM 추출) SQS 큐 URL. 큐가 정해지면 실제 값으로 교체."
+    Description: >
+      NVIDIA Build API 키. 실제 값은 여기 Default에 넣지 말고 배포 시
+      `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`처럼 CLI로 직접 넘길 것
+      (samconfig.toml은 git에 커밋되므로 여기에 실제 키를 적으면 히스토리에 평문으로 남는다).
 
-  LlmExtractQueueArn:
+  LlmBaseUrl:
     Type: String
-    Default: "arn:aws:sqs:ap-northeast-2:890608337282:REPLACE-ME-llm-extract-queue"
-    Description: "PLACEHOLDER — 위 큐의 ARN(SendMessage 권한 Resource로 사용). 실제 큐 생성 후 교체."
+    Default: "https://integrate.api.nvidia.com/v1"
+    Description: LLM API base_url. 다른 OpenAI 호환 API로 교체할 경우만 바꾸면 됨.
+
+  LlmModel:
+    Type: String
+    Default: "qwen/qwen3-next-80b-a3b-instruct"
+    Description: >
+      LLM 모델 이름. 3모델(현행 llama-3.1-8b/kimi-k2.6/qwen3-next-80b) x 4유형(물품/용역/공사/외자)
+      x 3회 라이브 테스트 결과 qwen3-next-80b-a3b-instruct 채택 — few-shot 오염 0/12,
+      joint_venture_allowed 정답률 12/12, recall이 나머지 둘보다 뚜렷하게 우수.
 
 Resources:
   # ============================================================
@@ -78,6 +90,25 @@ Resources:
       VisibilityTimeout: 720
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt ExtractHwpxDlq.Arn
+        maxReceiveCount: 3
+
+  LlmExtractDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: llm-extract-queue-dlq
+
+  LlmExtractQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: llm-extract-queue
+      # Lambda Timeout(180s)의 2배(=360s). 다른 큐들의 6배 관례보다 짧게 잡은 이유:
+      # VisibilityTimeout이 Lambda Timeout보다만 충분히 크면(정상 처리 시간은 실측 약 27초라
+      # 여유는 충분) 목적 달성 — 여기서 "충분히 크게"는 함수가 아직 정상 처리 중인데
+      # 가시성 타임아웃이 만료돼 다른 워커가 같은 메시지를 집어가는(중복 처리) 사태를
+      # 막을 정도면 되고, 6배(1080s)까지 늘릴 필요는 없다(실패 시 재시도가 그만큼 늦어질 뿐).
+      VisibilityTimeout: 360
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt LlmExtractDlq.Arn
         maxReceiveCount: 3
 
   # ============================================================
@@ -126,7 +157,7 @@ Resources:
               - Sid: SendToNextQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !Ref LlmExtractQueueArn
+                Resource: !GetAtt LlmExtractQueue.Arn
 
   ExtractHwpFunctionRole:
     Type: AWS::IAM::Role
@@ -168,7 +199,7 @@ Resources:
               - Sid: SendToNextQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !Ref LlmExtractQueueArn
+                Resource: !GetAtt LlmExtractQueue.Arn
 
   ExtractHwpxFunctionRole:
     Type: AWS::IAM::Role
@@ -210,7 +241,47 @@ Resources:
               - Sid: SendToNextQueue
                 Effect: Allow
                 Action: sqs:SendMessage
-                Resource: !Ref LlmExtractQueueArn
+                Resource: !GetAtt LlmExtractQueue.Arn
+
+  # LLM 추출 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다
+  # (S3 읽기 대상도 raw/*가 아니라 text_extracted/*, 쓰기 대상은 llm_extracted/*로 다름).
+  LlmExtractFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: llm-extract-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: llm-extract-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadExtractedText
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+              - Sid: WriteLlmExtracted
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/llm_extracted/*"
+        - PolicyName: llm-extract-sqs-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReceiveFromOwnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt LlmExtractQueue.Arn
 
   # ============================================================
   # Lambda — 3개 함수, 이미지 1개 공유(ImageUri 동일) + ImageConfig.Command만 다르게.
@@ -229,7 +300,7 @@ Resources:
       Role: !GetAtt ExtractPdfFunctionRole.Arn
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
       Events:
         PdfQueueEvent:
           Type: SQS
@@ -248,7 +319,7 @@ Resources:
       Role: !GetAtt ExtractHwpFunctionRole.Arn
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
       Events:
         HwpQueueEvent:
           Type: SQS
@@ -267,10 +338,60 @@ Resources:
       Role: !GetAtt ExtractHwpxFunctionRole.Arn
       Environment:
         Variables:
-          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueueUrl
+          LLM_EXTRACT_QUEUE_URL: !Ref LlmExtractQueue
       Events:
         HwpxQueueEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt ExtractHwpxQueue.Arn
             BatchSize: 1
+
+  # LLM 추출 함수 — 같은 이미지 공유, CMD만 다름. NVIDIA Build API의 분당 요청 한도(40 RPM) 대비
+  # ReservedConcurrentExecutions로 동시 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼
+  # 동시에 확장해서 순식간에 RPM을 초과시킬 수 있음). qwen3-next-80b 채택 후 실측 처리시간
+  # 약 27초/건 기준, 동시성 5 = 약 11 RPM(60s/27s * 5)으로 한도(40 RPM) 대비 충분히 안전.
+  # Timeout도 180초로 올림 — 큰 문서·모델 응답 지연 대비 여유(기존 Globals 120초로는
+  # 27초 실측 대비 안전하지만, 느린 케이스·모델 큐잉 지연을 감안해 개별 오버라이드).
+  LlmExtractFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: realtime-extract-llm-dev
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      ImageConfig:
+        Command: ["handlers.extract_llm.lambda_handler"]
+      Role: !GetAtt LlmExtractFunctionRole.Arn
+      Timeout: 180
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          NVIDIA_API_KEY: !Ref NvidiaApiKey
+          LLM_BASE_URL: !Ref LlmBaseUrl
+          LLM_MODEL: !Ref LlmModel
+      Events:
+        LlmQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt LlmExtractQueue.Arn
+            BatchSize: 1
+
+  # LlmExtractQueue 적체 감지용 — 액션 없이 콘솔 확인용(알람 상태만 봄, SNS 등 통보 없음).
+  # 15분(Period 300s x EvaluationPeriods 3) 이상 지속적으로 메시지 100개 넘게 쌓이면
+  # ReservedConcurrentExecutions=5 제한 때문에 처리가 밀리고 있다는 신호.
+  LlmExtractQueueBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: llm-extract-queue-backlog
+      AlarmDescription: >
+        LlmExtractQueue에 메시지가 15분 이상 100개를 초과해 쌓여있음(콘솔 확인용, 액션 없음).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt LlmExtractQueue.QueueName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
