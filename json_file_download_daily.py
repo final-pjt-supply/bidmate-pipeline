@@ -183,6 +183,10 @@ def run(args: argparse.Namespace) -> None:
     manifest_key = put_manifest(s3, args.bucket, metadata, run_end)
     print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
     print(f"[완료] 다운로드 성공={success}건, 실패={failed}건, 건너뜀={skipped}건")
+    if failed:
+        raise RuntimeError(
+            f"첨부 다운로드 실패 {failed}건이 발생했습니다. manifest=s3://{args.bucket}/{manifest_key}"
+        )
 
 
 def positive_int(value):

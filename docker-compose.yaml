@@ -1,7 +1,7 @@
-# Airflow 단일 노드 (LocalExecutor) — 메타DB는 외부 RDS, 수집+다운로드 DAG 전용.
-# Redis/Celery worker/Flower/Postgres 컨테이너 없음 (LocalExecutor + 외부 RDS).
+# Airflow 단일 노드 (LocalExecutor) — 메타DB는 같은 박스 Postgres 컨테이너, 수집+다운로드 DAG 전용.
+# Redis/Celery worker/Flower 없음 (LocalExecutor). 외부 RDS 없음 (postgres 컨테이너 내장).
 #
-# 사전 준비: .env 작성 (.env.example 참고), IAM 역할로 S3 접근, RDS(Postgres) 생성.
+# 사전 준비: .env 작성 (.env.example 참고), IAM 역할로 S3 접근.
 # 기동: docker compose up -d --build
 # UI: http://<EC2-IP>:8080
 
@@ -12,7 +12,7 @@ x-airflow-common: &airflow-common
     - .env
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${RDS_USER}:${RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DB}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
@@ -27,7 +27,6 @@ x-airflow-common: &airflow-common
     G2B_SERVICE_KEY: ${G2B_SERVICE_KEY}
     S3_BUCKET_NAME: ${S3_BUCKET_NAME}
     # AWS 자격증명은 EC2 IAM 역할(instance profile)로 자동 주입 — 키를 넣지 말 것.
-    # 리전만 명시해 boto3가 엔드포인트를 확정하게 한다.
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
   volumes:
     - ./dags:/opt/airflow/dags
@@ -36,8 +35,27 @@ x-airflow-common: &airflow-common
     # repo 전체를 마운트 — DAG가 여기서 python raw_json_daily.py 등을 실행한다.
     - .:/opt/bidding-agent
   user: "${AIRFLOW_UID:-50000}:0"
+  depends_on: &airflow-common-depends
+    postgres:
+      condition: service_healthy
 
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
@@ -46,8 +64,8 @@ services:
       - |
         airflow db migrate
         airflow users create \
-          --username "${AIRFLOW_ADMIN_USER:-admin}" \
-          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --username "${AIRFLOW_ADMIN_USER:-airflow}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-airflow}" \
           --firstname admin --lastname admin --role Admin \
           --email admin@example.com || true
     restart: "no"
@@ -57,6 +75,7 @@ services:
     command: scheduler
     restart: always
     depends_on:
+      <<: *airflow-common-depends
       airflow-init:
         condition: service_completed_successfully
     healthcheck:
@@ -72,6 +91,7 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      <<: *airflow-common-depends
       airflow-init:
         condition: service_completed_successfully
     healthcheck:
@@ -79,3 +99,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+volumes:
+  postgres-db-volume:

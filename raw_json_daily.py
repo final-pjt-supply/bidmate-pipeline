@@ -48,6 +48,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("g2b-daily")
 
 
+class G2BApiError(RuntimeError):
+    """조달청 API가 정상 response 대신 에러 응답을 반환했을 때 발생."""
+
+
 def s3_client():
     try:
         import boto3
@@ -71,7 +75,14 @@ def fetch(session, operation, bgn_dt, end_dt, ntce_instt_nm, page_no):
         try:
             response = session.get(f"{BASE_URL}/{operation}", params=params, timeout=TIMEOUT)
             response.raise_for_status()
-            body = response.json().get("response", {}).get("body", {})
+            payload = response.json()
+            if "response" not in payload:
+                error = payload.get("nkoneps.com.response.ResponseError", {}).get("header", {})
+                raise G2BApiError(
+                    f"{operation}/{ntce_instt_nm} p{page_no} API 에러 응답: "
+                    f"{error.get('resultCode', '?')} {error.get('resultMsg', '알 수 없음')}"
+                )
+            body = payload["response"].get("body", {})
             total = int(body.get("totalCount") or 0)
             items = body.get("items") or []
             if isinstance(items, dict):
@@ -102,9 +113,9 @@ def is_open(record, now):
     return close_dt is None or close_dt > now
 
 
-def is_exact_institution(record, ntce_instt_nm):
-    """ntceInsttNm 파라미터는 부분일치라 조회 대상 기관명과 완전일치하는 레코드만 남긴다."""
-    return (record.get("ntceInsttNm") or "").strip() == ntce_instt_nm
+def is_institution_match(record, ntce_instt_nm):
+    """조회 기관명과 그 하위 조직 명의 공고를 남긴다."""
+    return (record.get("ntceInsttNm") or "").strip().startswith(ntce_instt_nm)
 
 
 def in_window(record, window_start, window_end):
@@ -160,7 +171,7 @@ def collect_window(window_start, window_end, bucket):
 
                 for index, record in enumerate(records, start=1):
                     if (
-                        not is_exact_institution(record, ntce_instt_nm)
+                        not is_institution_match(record, ntce_instt_nm)
                         or not in_window(record, window_start, window_end)
                         or not is_open(record, window_end)
                     ):
