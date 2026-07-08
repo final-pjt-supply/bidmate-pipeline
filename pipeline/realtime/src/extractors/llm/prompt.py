@@ -217,7 +217,7 @@ _FEW_SHOT_ORDER = ("goods", "service", "construction", "foreign")
 
 
 def build_document_text(pages: list[dict]) -> str:
-    """text_extracted의 pages([{page,text}])를 [페이지 N] 마커로 이어붙인 통짜 텍스트로 만든다.
+    """extracted(텍스트 추출) 단계의 pages([{page,text}])를 [페이지 N] 마커로 이어붙인 통짜 텍스트로 만든다.
 
     evidence.page가 이 마커 번호를 그대로 참조하도록 SYSTEM_PROMPT에서 지시한다.
     """

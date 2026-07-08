@@ -24,7 +24,7 @@ Parameters:
     Type: String
     Default: bidmate
     Description: >
-      raw/text_extracted/llm_extracted가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된
+      raw/extracted/qualifications가 있는 S3 버킷 이름. SAM 밖에서 이미 생성된
       버킷(다른 팀원 소유, 원본은 읽기전용)이라 이름만 참조. 같은 AWS 계정(890608337282)
       소속으로 확인함 — 다른 계정이면 아래 IAM 정책이 그대로 안 먹을 수 있음.
 
@@ -117,7 +117,7 @@ Resources:
 
   # ============================================================
   # IAM — 함수별 실행 역할.
-  # 셋 다 동일한 패턴(S3 읽기 raw/downloads/daily/*, S3 쓰기 text_extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
+  # 셋 다 동일한 패턴(S3 읽기 raw/downloads/daily/*, S3 쓰기 extracted/*, 자기 큐 수신, 다음 큐 송신)이지만
   # "자기 큐" 수신 권한이 함수마다 다른 큐로 스코프돼야 해서 역할을 3개로 분리했다.
   # ============================================================
   ExtractPdfFunctionRole:
@@ -149,7 +149,7 @@ Resources:
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
         - PolicyName: extract-pdf-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -194,7 +194,7 @@ Resources:
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
         - PolicyName: extract-hwp-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -239,7 +239,7 @@ Resources:
               - Sid: WriteExtractedText
                 Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
         - PolicyName: extract-hwpx-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -257,10 +257,10 @@ Resources:
                 Resource: !GetAtt LlmExtractQueue.Arn
 
   # LLM 추출 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다
-  # (S3 읽기 대상도 raw/*가 아니라 text_extracted/*, 쓰기 대상은 llm_extracted/*로 다름).
-  # ⚠ "text_extracted"/"llm_extracted" 리터럴은 common/paths.py의 TEXT_EXTRACTED_PREFIX/
-  # LLM_EXTRACTED_PREFIX 상수와 반드시 같아야 한다. backfill_lambda 쪽 "extracted/" 명명과
-  # 통일하기로 하면(팀 논의 중) 여기 전부와 paths.py 상수를 같이 바꿔야 함.
+  # (S3 읽기 대상도 raw/*가 아니라 extracted/*, 쓰기 대상은 qualifications/*로 다름).
+  # ⚠ "extracted"/"qualifications" 리터럴은 common/paths.py의 EXTRACTED_PREFIX/
+  # QUALIFICATIONS_PREFIX 상수와 반드시 같아야 한다(2026-07-08 팀 명명 확정 —
+  # extracted는 backfill_lambda 선례와 통일, qualifications는 구 llm_extracted).
   LlmExtractFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -282,11 +282,11 @@ Resources:
               - Sid: ReadExtractedText
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/text_extracted/*"
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
               - Sid: WriteLlmExtracted
                 Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/llm_extracted/*"
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/qualifications/*"
         - PolicyName: llm-extract-sqs-access
           PolicyDocument:
             Version: '2012-10-17'

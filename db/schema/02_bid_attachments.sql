@@ -10,7 +10,7 @@ CREATE TABLE bid_attachments (
     file_url      TEXT,                   -- API: ntceSpecDocUrl1~10 (추정) — 번호 필드에서 분리
     s3_key        TEXT,                   -- 내부: raw 단계 key ({biz_div}/... 파티션 구조)
     status        VARCHAR(30) DEFAULT 'pending',
-                  -- 내부: 병합 시점 S3 대조 스냅샷 (collected/text_extracted/llm_extracted/failed)
+                  -- 내부: 병합 시점 S3 대조 스냅샷 (collected/extracted/qualifications/failed)
     updated_at    TIMESTAMP DEFAULT NOW(),  -- 내부: 마지막 병합 시각. KST naive
     UNIQUE (bid_ntce_no, bid_ntce_ord, file_seq),
     FOREIGN KEY (bid_ntce_no, bid_ntce_ord)
