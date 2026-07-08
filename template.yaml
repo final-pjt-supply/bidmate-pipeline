@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 다포맷(HWP/HWPX/PDF) 추출 Lambda × S3 Batch (backfill_lambda)
+
+Parameters:
+  Bucket:
+    Type: String
+    Default: bidmate
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 1024
+    AutoPublishAlias: live
+
+Resources:
+  HwpFunction:
+    Type: AWS::Serverless::Function
+    Metadata: { Dockerfile: docker/hwp/Dockerfile, DockerContext: . }
+    Properties:
+      PackageType: Image
+      Environment: { Variables: { ALLOWED_EXT: .hwp } }
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref Bucket }
+        - S3WritePolicy: { BucketName: !Ref Bucket }
+
+  HwpxFunction:
+    Type: AWS::Serverless::Function
+    Metadata: { Dockerfile: docker/hwpx/Dockerfile, DockerContext: . }
+    Properties:
+      PackageType: Image
+      Environment: { Variables: { ALLOWED_EXT: .hwpx } }
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref Bucket }
+        - S3WritePolicy: { BucketName: !Ref Bucket }
+
+  PdfFunction:
+    Type: AWS::Serverless::Function
+    Metadata: { Dockerfile: docker/pdf/Dockerfile, DockerContext: . }
+    Properties:
+      PackageType: Image
+      Environment: { Variables: { ALLOWED_EXT: .pdf } }
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref Bucket }
+        - S3WritePolicy: { BucketName: !Ref Bucket }
+
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: batchoperations.s3.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: batch-invoke-and-s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject]
+                Resource: !Sub arn:aws:s3:::${Bucket}/manifests/*
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !Sub arn:aws:s3:::${Bucket}/batch-reports/*
+              - Effect: Allow
+                Action: [lambda:InvokeFunction]
+                Resource:
+                  - !Sub ${HwpFunction.Arn}:live
+                  - !Sub ${HwpxFunction.Arn}:live
+                  - !Sub ${PdfFunction.Arn}:live
+
+Outputs:
+  HwpAlias:  { Value: !Sub "${HwpFunction.Arn}:live" }
+  HwpxAlias: { Value: !Sub "${HwpxFunction.Arn}:live" }
+  PdfAlias:  { Value: !Sub "${PdfFunction.Arn}:live" }
+  BatchJobRoleArn: { Value: !GetAtt BatchJobRole.Arn }

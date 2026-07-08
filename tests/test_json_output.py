@@ -44,9 +44,9 @@ def _fake_result(text):
 
 def test_to_json_doc_shape():
     result = _fake_result("aaaa\nbbbb\ncccc\ndddd")
-    doc = to_json_doc(result, "202607050001_00", "doc_01", max_chars=10)
-    assert doc["bid_ntce_no"] == "202607050001_00"
-    assert doc["document_id"] == "doc_01"
+    doc = to_json_doc(result, "202607050001_00", "doc01", max_chars=10)
+    assert doc["bid_id"] == "202607050001_00"
+    assert doc["document_id"] == "doc01"
     assert doc["pages"] == [
         {"page": 1, "text": "aaaa\nbbbb"},
         {"page": 2, "text": "cccc\ndddd"},
@@ -64,12 +64,19 @@ from parsing.hwp_hwpx.json_output import parse_doc_filename
 def test_parse_doc_filename_ok():
     assert parse_doc_filename("202607050001_00_doc_1") == (
         "202607050001_00",
-        "doc_01",
+        "doc1",
     )
 
 
-def test_parse_doc_filename_zero_pads_document_id():
-    assert parse_doc_filename("A123_02_doc_7")[1] == "doc_07"
+def test_parse_doc_filename_real_glued_form():
+    assert parse_doc_filename("R26BK01269024_000_doc01") == (
+        "R26BK01269024_000",
+        "doc01",
+    )
+
+
+def test_parse_doc_filename_keeps_raw_digits():
+    assert parse_doc_filename("A123_02_doc07")[1] == "doc07"
 
 
 def test_parse_doc_filename_bad_format_returns_none():
