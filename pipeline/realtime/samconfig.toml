@@ -8,7 +8,7 @@ confirm_changeset = true
 capabilities = "CAPABILITY_NAMED_IAM"
 # NvidiaApiKey는 여기 넣지 않는다(이 파일은 git에 커밋됨) — 배포 시
 # `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`처럼 CLI로 별도로 넘길 것.
-parameter_overrides = "ImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-extractor:latest\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://integrate.api.nvidia.com/v1\" LlmModel=\"qwen/qwen3-next-80b-a3b-instruct\""
+parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor:latest\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm:latest\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://integrate.api.nvidia.com/v1\" LlmModel=\"qwen/qwen3-next-80b-a3b-instruct\""
 image_repositories = []
 
 [default.global.parameters]

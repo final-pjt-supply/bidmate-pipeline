@@ -58,3 +58,6 @@ docs/
 # Sample data
 data/sample/*.pdf
 data/sample/output/
+
+# ── AWS SAM 빌드 산출물 (sam build 결과, 재생성 가능) ──
+.aws-sam/
