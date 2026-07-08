@@ -8,7 +8,7 @@ from extractors.llm.preprocess import filter_pages
 
 
 def extract(pages: list[dict]) -> dict:
-    """text_extracted의 pages([{page,text}])로 참가자격 JSON(18필드+evidence+not_found)을 추출한다."""
+    """extracted(텍스트 추출) 단계의 pages([{page,text}])로 참가자격 JSON(18필드+evidence+not_found)을 추출한다."""
     pages = filter_pages(pages)
     document_text = prompt.build_document_text(pages)
     messages = prompt.build_messages(document_text)

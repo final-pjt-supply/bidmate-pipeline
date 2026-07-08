@@ -18,7 +18,7 @@ def lambda_handler(event, _context):
 
 
 def _process(bucket: str, key: str) -> None:
-    parts = paths.parse_text_key(key)
+    parts = paths.parse_extracted_key(key)
     bid_id = parts["bid_id"]
     document_id = paths.document_id_from_file_id(bid_id, parts["file_id"])
     try:
@@ -27,8 +27,8 @@ def _process(bucket: str, key: str) -> None:
         qualifications = extractor.extract(pages)
         result = {"bid_id": bid_id, "document_id": document_id, **qualifications}
 
-        llm_key = paths.text_key_to_llm_key(key)
-        s3.put_object(bucket, llm_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        qualifications_key = paths.extracted_key_to_qualifications_key(key)
+        s3.put_object(bucket, qualifications_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
     except Exception:
         logger.exception(
             "LLM 자격요건 추출 실패: bucket=%s key=%s bid_id=%s document_id=%s",

@@ -1,60 +1,85 @@
 # -*- coding: utf-8 -*-
-"""raw/text_extracted S3 key 파티션 구조 파싱 및 변환.
+"""raw/extracted/qualifications S3 key 파티션 구조 파싱 및 변환.
 
-형식: raw/downloads/biz_div=TYPE/{stage}/year=Y/month=M/day=D/{bid_id}/{file_id}.{ext}
-biz_div가 stage보다 앞에 온다(품목별로 먼저 나뉘고, 그 아래에서 backfill/realtime이 갈림).
-stage는 backfill/realtime 둘 다 올 수 있다(백필 배치와 실시간 파이프라인이 같은 버킷을 공유).
+형식(bidmate 실버킷, 2026-07-08 전수 조사로 확정):
+  raw/downloads/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.{ext}
+
+stage가 biz_div보다 앞에 온다(테스트 버킷 realtime-dev-ds에서 쓰던 순서와 반대 —
+실버킷 조사 결과 이 순서가 맞아서 그쪽에 맞춤. 테스트 버킷 호환은 포기).
+hour=은 daily(우리 realtime 파이프라인이 다루는 stage) 전용이다 — backfill은
+hour= 없이 year/month/day까지만 쓰고, 별도 파이프라인(backfill_lambda)이 처리하므로
+이 정규식은 hour=이 없는 키(=backfill)를 의도적으로 거부한다.
+
+최상위 3형제는 raw / extracted / qualifications(2026-07-08 팀 명명 확정) —
+extracted는 텍스트 추출 산출물(backfill_lambda 선례와 이름 통일), qualifications는
+LLM 자격요건 산출물(구 llm_extracted).
+
+extracted/qualifications는 raw의 downloads/ 계층을 뺀 나머지를 그대로 미러링한다
+(downloads는 수집 파이프라인이 자기 산출물끼리 raw/raw, raw/curated, raw/downloads로
+구분하려고 쓰는 계층이라 우리 파생물엔 불필요 — 2026-07-08 확정):
+  raw:            raw/downloads/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.{ext}
+  extracted:      extracted/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.json
+  qualifications: qualifications/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.json
 """
 import re
 
+# 최상위 토큰만 상수로 빼둔다 — 나중에 또 이름이 바뀌어도 여기 한 줄만 고치면 됨.
+EXTRACTED_PREFIX = "extracted"
+QUALIFICATIONS_PREFIX = "qualifications"
+
 _RAW_KEY_RE = re.compile(
-    r"^raw/downloads/biz_div=(?P<biz_div>[^/]+)"
-    r"/(?P<stage>[^/]+)"
-    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)"
+    r"^raw/downloads/(?P<stage>[^/]+)"
+    r"/biz_div=(?P<biz_div>[^/]+)"
+    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)/hour=(?P<hour>[^/]+)"
     r"/(?P<bid_id>[^/]+)/(?P<file_id>[^/]+)\.(?P<ext>[^./]+)$"
 )
 
 
 def parse_raw_key(key: str) -> dict:
-    """raw key에서 biz_div/stage/year/month/day/bid_id/file_id/ext를 꺼낸다. 형식이 다르면 ValueError."""
+    """raw key에서 stage/biz_div/year/month/day/hour/bid_id/file_id/ext를 꺼낸다.
+
+    형식이 다르면(예: hour=이 없는 backfill 키) ValueError.
+    """
     m = _RAW_KEY_RE.match(key)
     if m is None:
         raise ValueError(f"raw key 형식이 아님: {key}")
     return m.groupdict()
 
 
-def raw_key_to_text_key(key: str) -> str:
-    """raw key와 같은 파티션 구조로 text_extracted 결과 key를 조립한다(확장자만 .json)."""
+def raw_key_to_extracted_key(key: str) -> str:
+    """raw key에서 downloads/를 뺀 나머지 파티션으로 extracted(텍스트 추출) 결과 key를 조립한다(확장자만 .json)."""
     parts = parse_raw_key(key)
     return (
-        "text_extracted/downloads/biz_div={biz_div}/{stage}/year={year}/month={month}/day={day}"
+        "{prefix}/{stage}/biz_div={biz_div}"
+        "/year={year}/month={month}/day={day}/hour={hour}"
         "/{bid_id}/{file_id}.json"
-    ).format(**parts)
+    ).format(prefix=EXTRACTED_PREFIX, **parts)
 
 
-_TEXT_KEY_RE = re.compile(
-    r"^text_extracted/downloads/biz_div=(?P<biz_div>[^/]+)"
-    r"/(?P<stage>[^/]+)"
-    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)"
+_EXTRACTED_KEY_RE = re.compile(
+    rf"^{re.escape(EXTRACTED_PREFIX)}/(?P<stage>[^/]+)"
+    r"/biz_div=(?P<biz_div>[^/]+)"
+    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)/hour=(?P<hour>[^/]+)"
     r"/(?P<bid_id>[^/]+)/(?P<file_id>[^/]+)\.json$"
 )
 
 
-def parse_text_key(key: str) -> dict:
-    """text_extracted key에서 biz_div/stage/year/month/day/bid_id/file_id를 꺼낸다. 형식이 다르면 ValueError."""
-    m = _TEXT_KEY_RE.match(key)
+def parse_extracted_key(key: str) -> dict:
+    """extracted(텍스트 추출) key에서 stage/biz_div/year/month/day/hour/bid_id/file_id를 꺼낸다. 형식이 다르면 ValueError."""
+    m = _EXTRACTED_KEY_RE.match(key)
     if m is None:
-        raise ValueError(f"text_extracted key 형식이 아님: {key}")
+        raise ValueError(f"{EXTRACTED_PREFIX} key 형식이 아님: {key}")
     return m.groupdict()
 
 
-def text_key_to_llm_key(key: str) -> str:
-    """text_extracted key와 같은 파티션 구조로 llm_extracted 결과 key를 조립한다."""
-    parts = parse_text_key(key)
+def extracted_key_to_qualifications_key(key: str) -> str:
+    """extracted key와 같은 파티션 구조로 첫 토큰만 qualifications(LLM 자격요건)로 바꿔 결과 key를 조립한다."""
+    parts = parse_extracted_key(key)
     return (
-        "llm_extracted/downloads/biz_div={biz_div}/{stage}/year={year}/month={month}/day={day}"
+        "{prefix}/{stage}/biz_div={biz_div}"
+        "/year={year}/month={month}/day={day}/hour={hour}"
         "/{bid_id}/{file_id}.json"
-    ).format(**parts)
+    ).format(prefix=QUALIFICATIONS_PREFIX, **parts)
 
 
 def document_id_from_file_id(bid_id: str, file_id: str) -> str:
