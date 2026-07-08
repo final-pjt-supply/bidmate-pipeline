@@ -12,8 +12,14 @@ hour= 없이 year/month/day까지만 쓰고, 별도 파이프라인(backfill_lam
 
 최상위 3형제는 raw / extracted / qualifications(2026-07-08 팀 명명 확정) —
 extracted는 텍스트 추출 산출물(backfill_lambda 선례와 이름 통일), qualifications는
-LLM 자격요건 산출물(구 llm_extracted). 구조는 raw를 hour=까지 포함해 완전히
-미러링하고 최상위 토큰만 바뀐다.
+LLM 자격요건 산출물(구 llm_extracted).
+
+extracted/qualifications는 raw의 downloads/ 계층을 뺀 나머지를 그대로 미러링한다
+(downloads는 수집 파이프라인이 자기 산출물끼리 raw/raw, raw/curated, raw/downloads로
+구분하려고 쓰는 계층이라 우리 파생물엔 불필요 — 2026-07-08 확정):
+  raw:            raw/downloads/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.{ext}
+  extracted:      extracted/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.json
+  qualifications: qualifications/{stage}/biz_div=TYPE/year=Y/month=M/day=D/hour=H/{bid_id}/{file_id}.json
 """
 import re
 
@@ -41,17 +47,17 @@ def parse_raw_key(key: str) -> dict:
 
 
 def raw_key_to_text_key(key: str) -> str:
-    """raw key와 같은 파티션 구조로 extracted(텍스트 추출) 결과 key를 조립한다(확장자만 .json)."""
+    """raw key에서 downloads/를 뺀 나머지 파티션으로 extracted(텍스트 추출) 결과 key를 조립한다(확장자만 .json)."""
     parts = parse_raw_key(key)
     return (
-        "{prefix}/downloads/{stage}/biz_div={biz_div}"
+        "{prefix}/{stage}/biz_div={biz_div}"
         "/year={year}/month={month}/day={day}/hour={hour}"
         "/{bid_id}/{file_id}.json"
     ).format(prefix=EXTRACTED_PREFIX, **parts)
 
 
 _TEXT_KEY_RE = re.compile(
-    rf"^{re.escape(EXTRACTED_PREFIX)}/downloads/(?P<stage>[^/]+)"
+    rf"^{re.escape(EXTRACTED_PREFIX)}/(?P<stage>[^/]+)"
     r"/biz_div=(?P<biz_div>[^/]+)"
     r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)/hour=(?P<hour>[^/]+)"
     r"/(?P<bid_id>[^/]+)/(?P<file_id>[^/]+)\.json$"
@@ -67,10 +73,10 @@ def parse_text_key(key: str) -> dict:
 
 
 def text_key_to_llm_key(key: str) -> str:
-    """extracted key와 같은 파티션 구조로 qualifications(LLM 자격요건) 결과 key를 조립한다."""
+    """extracted key와 같은 파티션 구조로 첫 토큰만 qualifications(LLM 자격요건)로 바꿔 결과 key를 조립한다."""
     parts = parse_text_key(key)
     return (
-        "{prefix}/downloads/{stage}/biz_div={biz_div}"
+        "{prefix}/{stage}/biz_div={biz_div}"
         "/year={year}/month={month}/day={day}/hour={hour}"
         "/{bid_id}/{file_id}.json"
     ).format(prefix=QUALIFICATIONS_PREFIX, **parts)

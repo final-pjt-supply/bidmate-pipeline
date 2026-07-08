@@ -43,19 +43,20 @@ def test_parse_raw_key_rejects_backfill_without_hour():
         paths.parse_raw_key(REAL_BACKFILL_KEY)
 
 
-def test_raw_key_to_text_key_mirrors_partitions_under_extracted_prefix():
+def test_raw_key_to_text_key_drops_downloads_layer_under_extracted_prefix():
+    """extracted/qualifications는 raw의 downloads/ 계층을 뺀다(2026-07-08 확정)."""
     text_key = paths.raw_key_to_text_key(REAL_RAW_KEY)
     assert text_key == (
-        "extracted/downloads/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
+        "extracted/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
         "/R26BK01620154_000/R26BK01620154_000_doc01.json"
     )
 
 
-def test_text_key_to_llm_key_mirrors_partitions_under_qualifications_prefix():
+def test_text_key_to_llm_key_drops_downloads_layer_under_qualifications_prefix():
     text_key = paths.raw_key_to_text_key(REAL_RAW_KEY)
     llm_key = paths.text_key_to_llm_key(text_key)
     assert llm_key == (
-        "qualifications/downloads/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
+        "qualifications/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
         "/R26BK01620154_000/R26BK01620154_000_doc01.json"
     )
 
