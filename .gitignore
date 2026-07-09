@@ -61,3 +61,6 @@ data/sample/output/
 
 # ── AWS SAM 빌드 산출물 (sam build 결과, 재생성 가능) ──
 .aws-sam/
+
+# ── 임베딩 실험용 데이터 (bidmate extracted/daily 원본 다운로드, 재현은 다운로드 스크립트로) ──
+experiments/embedding/data/
