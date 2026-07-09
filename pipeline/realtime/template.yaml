@@ -102,13 +102,13 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: realtime-llm-extract-queue
-      # Lambda Timeout(600s)의 2배(=1200s). 실측 처리시간은 76~180초대(문서 크기에
-      # 따라 편차 큼, 아래 ReservedConcurrentExecutions 주석 참고)라 600s Timeout
+      # Lambda Timeout(900s)의 2배(=1800s). 실측 처리시간은 76~180초대(문서 크기에
+      # 따라 편차 큼, 아래 ReservedConcurrentExecutions 주석 참고)라 900s Timeout
       # 자체엔 넉넉한 여유가 있고, VisibilityTimeout은 Timeout보다만 충분히 크면
       # 목적 달성 — 가시성 타임아웃 만료로 다른 워커가 같은 메시지를 집어가는
-      # (중복 처리) 사태만 막으면 되고, 다른 큐들의 6배(3600s) 관례까지 늘릴 필요는
+      # (중복 처리) 사태만 막으면 되고, 다른 큐들의 6배(5400s) 관례까지 늘릴 필요는
       # 없다.
-      VisibilityTimeout: 1200
+      VisibilityTimeout: 1800
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RealtimeLlmExtractDlq.Arn
         maxReceiveCount: 3
@@ -356,15 +356,13 @@ Resources:
   # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), 동시성 5 기준
   # 약 1.7~3.9 RPM(60s/180s*5 ~ 60s/76s*5)으로 한도(40 RPM) 대비 충분히 안전.
   #
-  # Timeout=600s(10분): 기존 180s에서 상향. 정상 처리도 실측 76~180초대까지 나오는데
-  # 180s Timeout이면 여유가 너무 빡빡해서, NVIDIA가 살짝만 느려도 정상 처리가 강제
-  # 타임아웃(SIGKILL류)으로 죽어 handler의 except조차 못 타고(ERROR 로그도 안 남고
-  # 원인 불명) SQS 재시도만 반복하는 사례가 실측으로 확인됨. 다만 이 600s를 "개별
-  # 요청이 10분까지 버틴다"는 뜻으로 쓰진 않는다 — 실제 요청 단위 컷오프는
-  # extractors/llm/client.py의 OpenAI 클라이언트 timeout(180s, Lambda Timeout보다
-  # 훨씬 짧음)이 먼저 걸려서 멈춘 요청이 10분짜리 슬롯을 통째로 붙잡는 일을 막고,
-  # 600s는 그 외의 예상 못 한 hang(client timeout이 못 잡는 경우)에 대한 바깥쪽
-  # 안전망 역할만 한다.
+  # Timeout=900s(15분, AWS Lambda 허용 최대치): 기존 180s → 600s → 900s로 상향.
+  # 실제 요청 단위 컷오프는 extractors/llm/client.py의 OpenAI 클라이언트
+  # timeout(600s, 10분)이 먼저 걸린다 — 정상이지만 느린 완료(실측 76~180초대,
+  # 표본 밖의 더 큰 문서는 더 걸릴 수 있음)를 섣불리 끊어서 재시도로 낭비하지
+  # 않도록 10분까지 유예를 주되, 진짜 멈춘 요청이 무한정 슬롯을 붙잡는 것도
+  # 막는 절충점이다. 900s(Lambda Timeout)는 client timeout(600s)이 못 잡는
+  # 예상 못 한 hang에 대한 바깥쪽 안전망 역할만 한다.
   RealtimeLlmExtractFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -372,7 +370,7 @@ Resources:
       PackageType: Image
       ImageUri: !Ref LlmImageUri
       Role: !GetAtt RealtimeLlmExtractFunctionRole.Arn
-      Timeout: 600
+      Timeout: 900
       MemorySize: 1024
       ReservedConcurrentExecutions: 5
       Environment:
