@@ -1,6 +1,17 @@
+import logging
 import re
-import json
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# 로그 레벨 원칙 — 이 구조는 나중에 Lambda로 승격돼도 CloudWatch로 그대로 이어진다.
+# "사람이 봐야 하는 것은 WARNING 이상" — DEBUG/INFO는 정상 동작 기록이라 평소엔
+# 안 봐도 되고, WARNING부터는 데이터 품질이나 설계 가정(조항 구조가 있을 것,
+# 표가 임베딩 한도 안에 들 것 등)이 깨졌다는 신호다.
+#   DEBUG   — 분할·병합 세부 동작(섹션/하위항목 경계 수, 슬라이딩 윈도우 청크 생성 등)
+#   INFO    — 문서 단위 요약(청크 수/truncated/dropped)
+#   WARNING — 표/박스 잘림(원본·유지 길이), 잔재 청크 드랍(드랍된 원문 포함),
+#             조항 인식 실패(구조 분할이 안 먹혀 슬라이딩 윈도우로 강제 폴백)
 
 MAX_TOKENS = 512
 MIN_TOKENS = 30        # 이보다 짧은 텍스트 청크는 다음 청크와 병합
@@ -23,9 +34,9 @@ def _tok(text: str) -> int:
     return int(len(text) / CHARS_PER_TOKEN)
 
 
-def chunk(text: str, source: str = "", dropped_out: list[str] | None = None) -> list[dict]:
-    """dropped_out을 넘기면 드랍된(기호/구분선 위주라 언어적 내용이 없는) 잔재 청크의
-    원문을 그 리스트에 추가한다(통계·눈검사용, 기본은 무시하고 안 쓸 수 있음)."""
+def chunk(text: str, source: str = "") -> list[dict]:
+    """source는 로그(특히 WARNING)에 함께 찍혀서 여러 문서를 한 번에 처리할 때
+    어느 문서에서 표가 잘렸는지/잔재가 드랍됐는지 추적하는 데 쓰인다."""
     # 전처리: 페이지 구분자 및 본문 내 페이지 번호 제거
     text = _PAGE_SEP.sub('\n', text)
     text = _INLINE_PAGE_NO.sub('\n', text)
@@ -36,14 +47,12 @@ def chunk(text: str, source: str = "", dropped_out: list[str] | None = None) -> 
     chunks = []
     for item_text, item_type in raw:
         if item_type in ('table', 'box'):
-            chunks.append(_build_block_chunk(item_text, item_type))
+            chunks.append(_build_block_chunk(item_text, item_type, source))
         else:
-            chunks.extend(_split_text(item_text))
+            chunks.extend(_split_text(item_text, source))
 
     # 짧은 청크 병합/드랍 후 빈 청크 제거 및 메타데이터 부여
-    chunks, dropped = _merge_short_chunks(chunks)
-    if dropped_out is not None:
-        dropped_out.extend(dropped)
+    chunks, dropped_count = _merge_short_chunks(chunks, source)
 
     result = []
     for i, c in enumerate(chunks):
@@ -61,10 +70,40 @@ def chunk(text: str, source: str = "", dropped_out: list[str] | None = None) -> 
                     entry['kept_chars'] = c['kept_chars']
             result.append(entry)
 
+    truncated_count = sum(1 for c in result if c.get('truncated'))
+    violation_count = _check_invariants(result, source)
+    logger.info(
+        "청킹 완료: source=%s chunks=%d truncated=%d dropped=%d 불변식위반=%d",
+        source, len(result), truncated_count, dropped_count, violation_count,
+    )
+
     return result
 
 
-def _build_block_chunk(text: str, item_type: str) -> dict:
+def _check_invariants(result: list[dict], source: str) -> int:
+    """truncated 표시된 표/박스 청크(잘림 안내 문구가 붙어 MAX_CHARS를 살짝 넘는
+    게 정상)를 제외한 모든 청크가 MAX_CHARS 이내인지 확인한다. 위반은 병합/분할
+    로직의 버그를 뜻하므로(정상 흐름에서는 나올 수 없어야 함) WARNING으로 남긴다."""
+    violations = 0
+    for c in result:
+        if c.get('truncated'):
+            continue
+        if len(c['text']) > MAX_CHARS:
+            violations += 1
+            logger.warning(
+                "청크 길이 불변식 위반: source=%s chunk_idx=%d type=%s length=%d자(한도 %d자)",
+                source, c['chunk_idx'], c['type'], len(c['text']), MAX_CHARS,
+                extra={
+                    'event': 'invariant_violation',
+                    'source': source,
+                    'chunk_idx': c['chunk_idx'],
+                    'length': len(c['text']),
+                },
+            )
+    return violations
+
+
+def _build_block_chunk(text: str, item_type: str, source: str) -> dict:
     """표/박스는 원자 블록이라 절대 안 쪼갠다 — 행/열 구조가 잘리면 의미가 깨지기 때문.
     다만 MAX_CHARS(768자, ≈512토큰)를 넘으면 임베딩 시 뒷부분이 어차피 잘려나간다
     (embedder.py의 max_length=512는 토크나이저가 앞부분만 남기고 뒷부분을 조용히
@@ -82,6 +121,16 @@ def _build_block_chunk(text: str, item_type: str) -> dict:
     original_chars = len(text)
     body = _truncate_block_body(text)
     truncated_text = f'{body}\n[표 일부 — 전체 내용은 원문 참조]'
+    logger.warning(
+        "표/박스 청크 잘림: source=%s original=%d자 kept=%d자",
+        source, original_chars, len(body),
+        extra={
+            'event': 'block_truncated',
+            'source': source,
+            'original_chars': original_chars,
+            'kept_chars': len(body),
+        },
+    )
     return {
         'text': truncated_text,
         'type': item_type,
@@ -146,28 +195,43 @@ def _split_at(text: str, boundaries: list[int]) -> list[str]:
     return parts
 
 
-def _sliding_window(text: str) -> list[dict]:
-    """토큰 제한 초과 시 슬라이딩 윈도우 (OVERLAP_LINES 오버랩)."""
+def _sliding_window(text: str, source: str) -> list[dict]:
+    """MAX_CHARS 초과 시 슬라이딩 윈도우 (OVERLAP_LINES 오버랩).
+
+    자를지 판단은 실제 결합 문자 길이(len('\\n'.join(...)))로 한다 — MAX_CHARS는
+    문자 단위 한도인데 토큰 추정치(_tok, CHARS_PER_TOKEN 근사)로 판단하면 환산
+    오차가 구조적으로 남는다. 실제로 숫자 하나씩 한 줄인 표(줄바꿈만 수백 개,
+    줄 자체는 짧음)에서 토큰 추정은 한도 안인데 줄바꿈이 누적되며 문자 수가
+    1125자까지 새는 사례가 있었다. 토큰 수(current_tok)는 로그 참고용으로만 남긴다.
+    """
     chunks = []
     lines = text.split('\n')
     current: list[str] = []
     current_tok = 0
 
     for line in lines:
-        lt = _tok(line)
-        if current_tok + lt > MAX_TOKENS and current:
+        candidate_len = len('\n'.join(current + [line]))
+        if candidate_len > MAX_CHARS and current:
             chunk_text = '\n'.join(current).strip()
             if chunk_text:
                 chunks.append({'text': chunk_text, 'type': 'text'})
+                logger.debug(
+                    "슬라이딩 윈도우 청크 생성: source=%s tokens=%d chars=%d",
+                    source, current_tok, len(chunk_text),
+                )
             current = current[-OVERLAP_LINES:]
             current_tok = sum(_tok(l) for l in current)
         current.append(line)
-        current_tok += lt
+        current_tok += _tok(line)
 
     if current:
         chunk_text = '\n'.join(current).strip()
         if chunk_text:
             chunks.append({'text': chunk_text, 'type': 'text'})
+            logger.debug(
+                "슬라이딩 윈도우 마지막 청크: source=%s tokens=%d chars=%d",
+                source, current_tok, len(chunk_text),
+            )
 
     return chunks
 
@@ -177,17 +241,22 @@ def _has_linguistic_content(text: str) -> bool:
     return bool(_LINGUISTIC.search(text))
 
 
-def _merge_short_chunks(chunks: list[dict]) -> tuple[list[dict], list[str]]:
+def _merge_short_chunks(chunks: list[dict], source: str) -> tuple[list[dict], int]:
     """MIN_TOKENS 미만 텍스트 청크를 처리한다.
 
     - 기호/구분선 위주라 언어적 내용이 없는 잔재(예: 흐름도의 '|' 하나만 남은 조각)는
-      드랍한다 — 살려둬도 임베딩 호출만 낭비되고 검색에 도움이 안 됨.
+      드랍한다 — 살려둬도 임베딩 호출만 낭비되고 검색에 도움이 안 됨. 드랍된 원문은
+      WARNING 로그(event=chunk_dropped)로 남긴다 — 별도 통계 파일 대신 로그에서 추출.
     - 언어적 내용이 있으면 우선 뒤따르는 텍스트 청크와 합치고(기존 동작), 그래도
       짧으면(다음이 표/박스라 못 합친 경우) 직전에 확정된 텍스트 청크에 붙인다
       — "가장 가까운 텍스트 청크"가 뒤에 없으면 앞으로 붙인다는 뜻.
-    두 번째 반환값은 드랍된 청크의 원문 리스트(통계·눈검사용).
+    - 병합은 결과가 MAX_CHARS를 넘지 않을 때만 실행한다(내용 손실 금지 원칙 —
+      "짧아서 병합"이 "한도 초과로 잘림"을 낳으면 병합의 취지가 무너짐). 한쪽 방향이
+      한도를 넘으면 반대 방향을 시도하고, 양쪽 다 넘으면 병합을 포기하고 짧은
+      청크를 그대로 독립 청크로 남긴다.
+    두 번째 반환값은 드랍된 청크 수(원문은 로그에서 확인).
     """
-    dropped: list[str] = []
+    dropped_count = 0
     merged: list[dict] = []
     i = 0
     n = len(chunks)
@@ -195,41 +264,55 @@ def _merge_short_chunks(chunks: list[dict]) -> tuple[list[dict], list[str]]:
         c = dict(chunks[i])
 
         if c['type'] == 'text' and _tok(c['text']) < MIN_TOKENS and not _has_linguistic_content(c['text']):
-            dropped.append(c['text'])
+            logger.warning(
+                "잔재 청크 드랍: source=%s text=%r",
+                source, c['text'],
+                extra={'event': 'chunk_dropped', 'source': source, 'dropped_text': c['text']},
+            )
+            dropped_count += 1
             i += 1
             continue
 
-        # 짧은 텍스트 청크는 다음 텍스트 청크와 계속 합침
-        while (
-            c['type'] == 'text'
-            and _tok(c['text']) < MIN_TOKENS
-            and i + 1 < n
-            and chunks[i + 1]['type'] == 'text'
-        ):
+        # 짧은 텍스트 청크는 다음 텍스트 청크와 계속 합침 — 단, 합친 결과가
+        # MAX_CHARS를 넘으면 그 병합은 취소하고(다음 청크는 소비하지 않고) 멈춘다.
+        while c['type'] == 'text' and _tok(c['text']) < MIN_TOKENS and i + 1 < n and chunks[i + 1]['type'] == 'text':
+            candidate = c['text'] + '\n' + chunks[i + 1]['text']
+            if len(candidate) > MAX_CHARS:
+                break
             i += 1
-            c['text'] = c['text'] + '\n' + chunks[i]['text']
+            logger.debug("짧은 청크를 다음 텍스트 청크와 병합: source=%s", source)
+            c['text'] = candidate
 
-        # 그래도 여전히 짧다면(뒤가 표/박스라 못 합쳤음) 직전 텍스트 청크에 붙인다
+        # 그래도 여전히 짧다면(뒤가 표/박스라 못 합쳤거나, 정방향 병합이 한도 초과로
+        # 취소됐음) 직전 텍스트 청크에 붙여본다 — 이것도 한도를 넘으면 포기.
         if c['type'] == 'text' and _tok(c['text']) < MIN_TOKENS:
             prev_text = next((m for m in reversed(merged) if m['type'] == 'text'), None)
             if prev_text is not None:
-                prev_text['text'] = prev_text['text'] + '\n' + c['text']
-                i += 1
-                continue
+                candidate = prev_text['text'] + '\n' + c['text']
+                if len(candidate) <= MAX_CHARS:
+                    logger.debug("짧은 청크를 직전 텍스트 청크에 병합: source=%s", source)
+                    prev_text['text'] = candidate
+                    i += 1
+                    continue
+                logger.debug(
+                    "짧은 청크 병합 불가(양방향 모두 한도 초과) — 독립 청크로 유지: source=%s",
+                    source,
+                )
 
         merged.append(c)
         i += 1
 
-    return merged, dropped
+    return merged, dropped_count
 
 
-def _split_text(text: str) -> list[dict]:
+def _split_text(text: str, source: str) -> list[dict]:
     """일반 텍스트를 섹션 헤더 기준 → 토큰 제한 순으로 분리."""
     chunks = []
 
     # 1차: 주 섹션 (1. 2. 3. ...)
     main_bounds = [m.start() for m in _MAIN_SECTION.finditer(text)]
     sections = _split_at(text, main_bounds)
+    logger.debug("주 섹션 분할: source=%s 섹션 경계=%d개", source, len(main_bounds))
 
     for section in sections:
         if _tok(section) <= MAX_TOKENS:
@@ -239,18 +322,34 @@ def _split_text(text: str) -> list[dict]:
         # 2차: 하위 항목 (가. 나. / 1.1. 1.2. ...)
         sub_bounds = [m.start() for m in _SUB_SECTION.finditer(section)]
         sub_sections = _split_at(section, sub_bounds)
+        logger.debug("하위 항목 분할: source=%s 하위 경계=%d개", source, len(sub_bounds))
 
         for sub in sub_sections:
             if _tok(sub) <= MAX_TOKENS:
                 chunks.append({'text': sub.strip(), 'type': 'text'})
             else:
+                if not sub_bounds:
+                    # 하위 항목 경계도 못 찾았는데(가.나.다. / 1.1. 1.2. 같은 패턴이
+                    # 전혀 없음) 여전히 MAX_TOKENS 초과 — 조항 구조를 아예 못 찾아서
+                    # 슬라이딩 윈도우로 강제 폴백하는 것이므로 사람이 봐야 함.
+                    logger.warning(
+                        "조항 인식 실패 — 슬라이딩 윈도우로 폴백: source=%s length=%d자 preview=%r",
+                        source, len(sub), sub[:80],
+                        extra={
+                            'event': 'section_split_failed',
+                            'source': source,
+                            'length': len(sub),
+                        },
+                    )
                 # 3차: 슬라이딩 윈도우
-                chunks.extend(_sliding_window(sub))
+                chunks.extend(_sliding_window(sub, source))
 
     return chunks
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     txt_dir = Path(__file__).parent.parent / "data" / "sample" / "output" / "txt"
     for txt_file in sorted(txt_dir.glob("*.txt")):
         text = txt_file.read_text(encoding="utf-8")
