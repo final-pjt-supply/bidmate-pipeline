@@ -20,6 +20,7 @@ qualifications 대응 key가 S3에 실제로 있는지 대조해서 상태를 �
     cd pipeline/realtime/scripts && python pipeline_status.py --detail   # 전체 상태표
 """
 import argparse
+import re
 import sys
 import time
 from collections import Counter
@@ -184,11 +185,32 @@ def _log_groups_for(status: FileStatus) -> list[str]:
     return groups
 
 
-def fetch_related_logs(logs_client, status: FileStatus) -> list[str]:
-    """멈춘 파일의 bid_id/document_id로 관련 Lambda 로그그룹에서 PROCESS_*/ERROR/WARNING
-    로그를 raw 유입 시각 이후 범위로 조회한다. 결과가 없으면 빈 리스트를 반환하고,
-    호출부(print_summary)가 "로그 무흔적"으로 표시한다."""
-    groups = _log_groups_for(status)
+_CW_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+_DURATION_MS_RE = re.compile(r"duration_ms=(\d+)")
+
+
+def _run_insights_query(logs_client, group: str, query: str, start_time: int, end_time: int) -> list[dict]:
+    query_id = logs_client.start_query(
+        logGroupNames=[group], startTime=start_time, endTime=end_time, queryString=query, limit=50,
+    )["queryId"]
+
+    result = {"status": "Running", "results": []}
+    for _ in range(20):
+        result = logs_client.get_query_results(queryId=query_id)
+        if result["status"] in ("Complete", "Failed", "Cancelled"):
+            break
+        time.sleep(0.5)
+    return result.get("results", [])
+
+
+def fetch_related_logs(logs_client, status: FileStatus) -> list[dict]:
+    """멈춘 파일의 bid_id/document_id로 관련 Lambda 로그그룹(단계별로 따로)에서
+    PROCESS_*/ERROR/WARNING 로그를 raw 유입 시각 이후 범위로 조회한다. 그룹별로
+    쿼리를 따로 날려서 각 이벤트가 어느 단계(추출/LLM) 소속인지 태그를 붙인다
+    (단계 소요시간 계산에 필요 — summarize_stage_timings 참고).
+
+    결과가 없으면 빈 리스트를 반환하고, 호출부(print_summary)가 "로그 무흔적"으로
+    표시한다."""
     start_time = int(status.raw_last_modified.timestamp())
     end_time = int(time.time())
     query = (
@@ -198,25 +220,58 @@ def fetch_related_logs(logs_client, status: FileStatus) -> list[str]:
         " | filter @message like /PROCESS_/ or @message like /ERROR/ or @message like /WARNING/"
         " | sort @timestamp asc"
     )
-    query_id = logs_client.start_query(
-        logGroupNames=groups,
-        startTime=start_time,
-        endTime=end_time,
-        queryString=query,
-        limit=50,
-    )["queryId"]
 
-    result = {"status": "Running", "results": []}
-    for _ in range(20):
-        result = logs_client.get_query_results(queryId=query_id)
-        if result["status"] in ("Complete", "Failed", "Cancelled"):
-            break
-        time.sleep(0.5)
+    events = []
+    for group in _log_groups_for(status):
+        for row in _run_insights_query(logs_client, group, query, start_time, end_time):
+            fields = {f["field"]: f["value"] for f in row}
+            raw_ts = fields.get("@timestamp", "")
+            try:
+                ts = datetime.strptime(raw_ts, _CW_TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
+            except ValueError:
+                ts = status.raw_last_modified
+            events.append({"group": group, "timestamp": ts, "message": fields.get("@message", "").strip()})
+
+    events.sort(key=lambda e: e["timestamp"])
+    return events
+
+
+def summarize_stage_timings(status: FileStatus, events: list[dict]) -> list[str]:
+    """이미 조회해온 로그 이벤트(fetch_related_logs 결과)에서 PROCESS_START/DONE의
+    timestamp와 duration_ms를 뽑아 단계 간 소요시간을 계산한다. 새 API 호출은
+    없다 — 이미 있는 timestamp/duration_ms를 파싱만 한다.
+
+    - raw 도착 → 추출 시작: 큐 대기시간(추출 Lambda가 메시지를 집어들기까지)
+    - 추출 처리시간: PROCESS_DONE의 duration_ms(추출 Lambda 안에서 걸린 시간)
+    - 추출 완료 → LLM 시작: 큐 대기시간(다음 단계로 넘어가는 데 걸린 시간)
+    - LLM 처리시간: PROCESS_DONE의 duration_ms
+    실패해서 해당 단계 로그 자체가 없으면 그 줄은 그냥 생략한다(부분 결과 허용).
+    """
+    extract_group = EXTRACT_LOG_GROUPS[status.ext]
+
+    def _find(group: str, event_type: str) -> dict | None:
+        return next((e for e in events if e["group"] == group and event_type in e["message"]), None)
+
+    extract_start = _find(extract_group, "PROCESS_START")
+    extract_done = _find(extract_group, "PROCESS_DONE")
+    llm_start = _find(LLM_LOG_GROUP, "PROCESS_START")
+    llm_done = _find(LLM_LOG_GROUP, "PROCESS_DONE")
 
     lines = []
-    for row in result.get("results", []):
-        fields = {f["field"]: f["value"] for f in row}
-        lines.append(f'{fields.get("@timestamp", "?")}  {fields.get("@message", "").strip()}')
+    if extract_start:
+        wait = (extract_start["timestamp"] - status.raw_last_modified).total_seconds()
+        lines.append(f"raw 도착 → 추출 시작: {wait:.1f}초 대기")
+    if extract_done:
+        m = _DURATION_MS_RE.search(extract_done["message"])
+        if m:
+            lines.append(f"추출 처리시간: {int(m.group(1)) / 1000:.1f}초")
+    if extract_done and llm_start:
+        wait = (llm_start["timestamp"] - extract_done["timestamp"]).total_seconds()
+        lines.append(f"추출 완료 → LLM 시작: {wait:.1f}초 대기")
+    if llm_done:
+        m = _DURATION_MS_RE.search(llm_done["message"])
+        if m:
+            lines.append(f"LLM 처리시간: {int(m.group(1)) / 1000:.1f}초")
     return lines
 
 
@@ -246,12 +301,17 @@ def print_summary(statuses: list[FileStatus], queue_stats: dict, logs_client) ->
         stage = "extracted" if s.status == "extracted_stalled" else "raw"
         print(f"- {s.raw_key}")
         print(f"    bid_id={s.bid_id} document_id={s.document_id} 단계={stage} 경과={_format_elapsed(s.elapsed)}")
-        logs = fetch_related_logs(logs_client, s)
-        if not logs:
+        events = fetch_related_logs(logs_client, s)
+        if not events:
             print("    로그 무흔적 — 이벤트/큐 단계 미도달 의심")
         else:
-            for line in logs:
-                print(f"    | {line}")
+            for e in events:
+                print(f'    | {e["timestamp"]}  {e["message"]}')
+            timings = summarize_stage_timings(s, events)
+            if timings:
+                print("    단계별 소요:")
+                for t in timings:
+                    print(f"      - {t}")
     print()
 
     print("=== 큐 상태 ===")
