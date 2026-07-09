@@ -5,7 +5,7 @@ import logging
 import time
 
 from common import paths, s3, sqs
-from common.logs import log_process_done, log_process_start
+from common.logs import log_process_done, log_process_skip, log_process_start
 from common.result import build_result
 from extractors import pdf
 
@@ -27,6 +27,16 @@ def _process(bucket: str, key: str) -> None:
     parts = paths.parse_raw_key(key)
     bid_id = parts["bid_id"]
     document_id = paths.document_id_from_file_id(bid_id, parts["file_id"])
+    extracted_key = paths.raw_key_to_extracted_key(key)
+
+    # 같은 raw 파일에 대한 이벤트가 몇 분 간격으로 여러 번 들어와 같은 문서가
+    # 중복으로 성공 처리되고 다음 큐(LLM)로도 중복 전송되는 사례가 실측으로
+    # 확인됨(원인은 이 Lambda 밖 — raw 업로드/S3 알림 쪽으로 추정되나 통제 밖).
+    # extracted_key가 이미 있으면 이미 처리된 것이므로 재처리·재전송하지 않는다.
+    if s3.object_exists(bucket, extracted_key):
+        log_process_skip(bid_id, document_id, "SKIPPED_DUPLICATE")
+        return
+
     log_process_start(bid_id, document_id, key)
     start = time.monotonic()
     try:
@@ -34,7 +44,6 @@ def _process(bucket: str, key: str) -> None:
         extracted = pdf.extract(raw_bytes)
         result = build_result(bid_id, document_id, extracted["pages"])
 
-        extracted_key = paths.raw_key_to_extracted_key(key)
         s3.put_object(bucket, extracted_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
         sqs.send_to_next_queue({"bucket": bucket, "key": extracted_key})
         log_process_done(bid_id, document_id, int((time.monotonic() - start) * 1000), extracted_key)
