@@ -18,10 +18,11 @@ _model: str | None = None
 # 못 타는 사례가 실측으로 확인됨 — 그러면 ERROR 로그도 안 남고 원인도 못 찾는다.
 # max_retries=0으로 SDK 재시도를 꺼서 실패를 곧장 예외로 올리고(handler가 잡아서
 # ERROR 로그 남김), 재시도는 SQS 쪽(이미 maxReceiveCount=3+DLQ로 설계됨)에
-# 전담시킨다. timeout은 Lambda Timeout(600s, template.yaml)보다 훨씬 짧게 잡아서
-# — 정상 완료도 실측 76~180초대까지 나오므로 180초면 충분한 여유 — 진짜 멈춘
-# 요청이 10분짜리 Lambda 슬롯을 통째로 붙잡는 사태를 막는다.
-_REQUEST_TIMEOUT_SECONDS = 180.0
+# 전담시킨다. timeout은 Lambda Timeout(900s, template.yaml)보다 짧게 잡아서 진짜
+# 멈춘 요청이 Lambda 슬롯을 15분 꽉 채워 붙잡는 사태만 막고, 정상이지만 느린
+# 완료(실측 76~180초대, 표본 밖의 더 큰 문서는 더 걸릴 수 있음)는 섣불리 끊어서
+# 재시도로 낭비하지 않도록 10분(600초)까지 유예를 준다.
+_REQUEST_TIMEOUT_SECONDS = 600.0
 
 
 def _get_client() -> OpenAI:
