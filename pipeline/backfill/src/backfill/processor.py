@@ -61,7 +61,11 @@ def process_task(bucket: str, key: str) -> str:
     except ValueError as e:
         raise PermanentFailure(str(e))
 
-    if s3.object_exists(bucket, out_key):
+    try:
+        exists = s3.object_exists(bucket, out_key)
+    except (ClientError, BotoCoreError) as e:
+        _raise_s3_failure(e)
+    if exists:
         logger.info("skip (이미 존재): %s", out_key)
         return out_key  # 멱등 skip
 

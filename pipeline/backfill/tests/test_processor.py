@@ -84,6 +84,16 @@ def test_missing_pages_is_permanent(monkeypatch):
         processor.process_task(BUCKET, KEY)
 
 
+def test_object_exists_slowdown_is_temporary(monkeypatch):
+    _patch(monkeypatch)
+    err = ClientError({"Error": {"Code": "SlowDown"}}, "HeadObject")
+    def boom(b, k):
+        raise err
+    monkeypatch.setattr(processor.s3, "object_exists", boom)
+    with pytest.raises(processor.TemporaryFailure):
+        processor.process_task(BUCKET, KEY)
+
+
 def test_s3_get_slowdown_is_temporary(monkeypatch):
     err = ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
     _patch(monkeypatch, get_exc=err)
