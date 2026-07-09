@@ -39,6 +39,7 @@ bidding-agent/
 │
 ├── raw_json_daily.py                  # [daily]    최근 N분 공고 수집 (동기)
 ├── json_file_download_daily.py        # [daily]    최근 N분 curated의 첨부 다운로드 (동기)
+├── daily_stats.py                     # [daily]    첨부 다운로드 5분/1시간 통계 저장
 ├── raw_json_backfill.py               # [backfill] 기간 지정 공고 수집 (비동기: httpx + aioboto3)
 ├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (비동기)
 │
@@ -77,6 +78,7 @@ bidding-agent/
 s3://bidmate/raw/raw/{backfill,daily}/        # API 원본 그대로 (113필드)
 s3://bidmate/raw/curated/{backfill,daily}/    # schema.py 변환 결과 (47필드)
 s3://bidmate/raw/downloads/{backfill,daily}/  # 첨부파일 실물 + _metadata/ (다운로드 manifest)
+s3://bidmate/raw/downloads/daily/_metadata/stats/  # daily 첨부 다운로드 5분/1시간 통계
 ```
 
 `backfill/`은 `year=YYYY/month=MM/day=DD`, `daily/`는
@@ -290,6 +292,18 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
   이는 공고를 15분치 수집한다는 뜻이 아니라, 앞 task 지연이나 Airflow 재시도 지연으로
   S3에 저장된 curated JSON을 놓치지 않기 위한 완충 창이다. gap 복구로 수집 창이
   15분보다 커지면 다운로드 창도 같은 크기로 늘린다.
+- 다운로드 후 `update_5min_stats`, `update_hourly_stats` task가 이어서 실행된다.
+  통계는 raw/curated 수집 통계가 아니라 **curated 첨부 URL → downloads 파일 저장 과정**만
+  요약한다. 서비스별(`cnstwk`, `servc`, `frgcpt`, `thng`)과 전체(`all`)로 각각 저장한다.
+  - 5분 통계:
+    `raw/downloads/daily/_metadata/stats/grain=5min/biz_div={biz_div}/year=YYYY/month=MM/day=DD/hour=HH/stats_YYYYMMDDHHMM.json`
+  - 1시간 통계:
+    `raw/downloads/daily/_metadata/stats/grain=hour/biz_div={biz_div}/year=YYYY/month=MM/day=DD/stats_YYYYMMDDHH.json`
+  - 저장 변수:
+    `expected_file_count`, `target_file_count`, `success_file_count`, `failed_file_count`,
+    `target_download_success_rate`
+  1시간 통계는 5분 통계를 증분 반영하고, `seen_windows`로 재시도 중복 합산을 막는다.
+  정시가 지나면 직전 hour를 `final` 또는 `final_with_missing`으로 확정한다.
 - DAG 설정은 `catchup=False`, `max_active_runs=1`, `retries=2`를 기본으로 둔다.
   과거 미실행 구간을 몰아서 따라잡지 않고, 이전 실행이 끝나기 전에 다음 5분 실행이
   겹치지 않게 하기 위한 선택이다.
