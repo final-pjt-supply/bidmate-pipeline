@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  LLM 자격요건 추출 backfill (S3 Batch → Lambda).
+  extracted/downloads/backfill/ → qualifications/backfill/.
+  realtime과 완전 분리된 자체 이미지·스택. SAM이 Dockerfile로 이미지를 직접 빌드.
+
+Parameters:
+  SourceBucketName:
+    Type: String
+    Default: bidmate
+
+  NvidiaApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      NVIDIA Build API 키. Default에 넣지 말고 배포 시
+      `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`로 전달.
+
+  LlmBaseUrl:
+    Type: String
+    Default: "https://integrate.api.nvidia.com/v1"
+
+  LlmModel:
+    Type: String
+    Default: "qwen/qwen3-next-80b-a3b-instruct"
+
+Resources:
+  BackfillLlmFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: backfill-llm-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: backfill-llm-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadExtracted
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: HeadWriteQualifications
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/qualifications/*"
+
+  BackfillLlmFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: pipeline/backfill/Dockerfile
+      DockerContext: ../..
+    Properties:
+      FunctionName: backfill-extract-llm
+      PackageType: Image
+      Role: !GetAtt BackfillLlmFunctionRole.Arn
+      Timeout: 180
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          NVIDIA_API_KEY: !Ref NvidiaApiKey
+          LLM_BASE_URL: !Ref LlmBaseUrl
+          LLM_MODEL: !Ref LlmModel
+
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: backfill-llm-batch-job-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: batchoperations.s3.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: batch-invoke-and-s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject]
+                Resource: !Sub arn:aws:s3:::${SourceBucketName}/manifests/*
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !Sub arn:aws:s3:::${SourceBucketName}/batch-reports/*
+              - Effect: Allow
+                Action: [lambda:InvokeFunction]
+                Resource: !GetAtt BackfillLlmFunction.Arn
+
+Outputs:
+  BackfillLlmFunctionArn:
+    Value: !GetAtt BackfillLlmFunction.Arn
+  BatchJobRoleArn:
+    Value: !GetAtt BatchJobRole.Arn
