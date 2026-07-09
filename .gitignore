@@ -59,3 +59,8 @@ docs/
 data/sample/*.pdf
 data/sample/output/
 batch-reports/
+
+# ── SAM / 빌드 산출물 · 생성 매니페스트 (로컬 전용) ──
+.aws-sam/
+samconfig.toml
+manifest-*.csv
