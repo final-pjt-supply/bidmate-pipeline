@@ -1,1 +1,3 @@
 lxml
+pyhwp
+pymupdf==1.26.0

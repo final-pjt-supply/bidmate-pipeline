@@ -19,7 +19,7 @@ Resources:
     Metadata: { Dockerfile: docker/hwp/Dockerfile, DockerContext: . }
     Properties:
       PackageType: Image
-      Environment: { Variables: { ALLOWED_EXT: .hwp } }
+      Environment: { Variables: { ALLOWED_EXT: ".hwp,.hwpx" } }
       Policies:
         - S3ReadPolicy: { BucketName: !Ref Bucket }
         - S3WritePolicy: { BucketName: !Ref Bucket }
