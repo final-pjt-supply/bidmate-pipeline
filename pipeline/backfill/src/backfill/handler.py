@@ -17,9 +17,10 @@ def lambda_handler(event: dict, _context) -> dict:
     results = []
     for task in event["tasks"]:
         task_id = task["taskId"]
-        bucket = task["s3BucketArn"].rsplit(":", 1)[-1]
-        key = unquote(task["s3Key"])
+        key = task.get("s3Key", "")  # 로깅용 안전 기본값(unquote/추출 실패 시 NameError 방지)
         try:
+            bucket = task["s3BucketArn"].rsplit(":", 1)[-1]
+            key = unquote(task["s3Key"])
             out_key = processor.process_task(bucket, key)
             code, msg = "Succeeded", out_key
         except processor.TemporaryFailure as e:

@@ -68,3 +68,31 @@ def test_bucket_parsed_from_arn(monkeypatch):
     handler.lambda_handler(_event(), None)
     assert seen["bucket"] == "bidmate"
     assert seen["key"] == KEY
+
+
+def test_malformed_task_isolated_not_abort_batch(monkeypatch):
+    monkeypatch.setattr(processor, "process_task", lambda b, k: "qualifications/backfill/x.json")
+    event = {
+        "invocationId": "inv-123",
+        "invocationSchemaVersion": "1.0",
+        "tasks": [
+            {"taskId": "bad", "s3BucketArn": "arn:aws:s3:::bidmate"},  # s3Key 누락
+            {"taskId": "good", "s3BucketArn": "arn:aws:s3:::bidmate", "s3Key": KEY},
+        ],
+    }
+    resp = handler.lambda_handler(event, None)
+    by_id = {r["taskId"]: r["resultCode"] for r in resp["results"]}
+    assert by_id["bad"] == "PermanentFailure"   # 필드 누락도 그 task만 실패
+    assert by_id["good"] == "Succeeded"         # 형제 task는 계속 처리됨
+    assert len(resp["results"]) == 2
+
+
+def test_s3_key_is_url_decoded(monkeypatch):
+    seen = {}
+    def capture(b, k):
+        seen["key"] = k
+        return "qualifications/backfill/x.json"
+    monkeypatch.setattr(processor, "process_task", capture)
+    encoded_key = "extracted/downloads/backfill/biz_div=cnstwk/year=2026/month=01/day=02/R25BK01213271_001/R25BK01213271_001_doc%2001.json"
+    handler.lambda_handler(_event(key=encoded_key), None)
+    assert seen["key"] == "extracted/downloads/backfill/biz_div=cnstwk/year=2026/month=01/day=02/R25BK01213271_001/R25BK01213271_001_doc 01.json"
