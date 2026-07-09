@@ -61,3 +61,9 @@ data/sample/output/
 
 # ── AWS SAM 빌드 산출물 (sam build 결과, 재생성 가능) ──
 .aws-sam/
+
+# ── 임베딩 실험 산출물 (원본 데이터/청크/벡터 — 재현은 스크립트로, 스크립트와
+#    RESULTS.md만 커밋) ──
+experiments/embedding/data/
+experiments/embedding/chunks/
+experiments/embedding/vectors/
