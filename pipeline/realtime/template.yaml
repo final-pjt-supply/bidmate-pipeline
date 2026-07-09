@@ -102,11 +102,13 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: realtime-llm-extract-queue
-      # Lambda Timeout(180s)의 2배(=360s). 다른 큐들의 6배 관례보다 짧게 잡은 이유:
-      # VisibilityTimeout이 Lambda Timeout보다만 충분히 크면(정상 처리 시간은 실측 약
-      # 27초라 여유는 충분) 목적 달성 — 가시성 타임아웃 만료로 다른 워커가 같은
-      # 메시지를 집어가는(중복 처리) 사태만 막으면 되고, 6배(1080s)까지 늘릴 필요는 없다.
-      VisibilityTimeout: 360
+      # Lambda Timeout(600s)의 2배(=1200s). 실측 처리시간은 76~180초대(문서 크기에
+      # 따라 편차 큼, 아래 ReservedConcurrentExecutions 주석 참고)라 600s Timeout
+      # 자체엔 넉넉한 여유가 있고, VisibilityTimeout은 Timeout보다만 충분히 크면
+      # 목적 달성 — 가시성 타임아웃 만료로 다른 워커가 같은 메시지를 집어가는
+      # (중복 처리) 사태만 막으면 되고, 다른 큐들의 6배(3600s) 관례까지 늘릴 필요는
+      # 없다.
+      VisibilityTimeout: 1200
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RealtimeLlmExtractDlq.Arn
         maxReceiveCount: 3
@@ -350,8 +352,19 @@ Resources:
 
   # NVIDIA Build API의 분당 요청 한도(40 RPM) 대비 ReservedConcurrentExecutions로 동시
   # 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼 동시에 확장해서 순식간에 RPM을
-  # 초과시킬 수 있음). qwen3-next-80b 기준 실측 처리시간 약 27초/건, 동시성 5 = 약
-  # 11 RPM(60s/27s * 5)으로 한도(40 RPM) 대비 충분히 안전.
+  # 초과시킬 수 있음). qwen3-next-80b 기준 실측 처리시간은 76~180초대(문서 크기 따라
+  # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), 동시성 5 기준
+  # 약 1.7~3.9 RPM(60s/180s*5 ~ 60s/76s*5)으로 한도(40 RPM) 대비 충분히 안전.
+  #
+  # Timeout=600s(10분): 기존 180s에서 상향. 정상 처리도 실측 76~180초대까지 나오는데
+  # 180s Timeout이면 여유가 너무 빡빡해서, NVIDIA가 살짝만 느려도 정상 처리가 강제
+  # 타임아웃(SIGKILL류)으로 죽어 handler의 except조차 못 타고(ERROR 로그도 안 남고
+  # 원인 불명) SQS 재시도만 반복하는 사례가 실측으로 확인됨. 다만 이 600s를 "개별
+  # 요청이 10분까지 버틴다"는 뜻으로 쓰진 않는다 — 실제 요청 단위 컷오프는
+  # extractors/llm/client.py의 OpenAI 클라이언트 timeout(180s, Lambda Timeout보다
+  # 훨씬 짧음)이 먼저 걸려서 멈춘 요청이 10분짜리 슬롯을 통째로 붙잡는 일을 막고,
+  # 600s는 그 외의 예상 못 한 hang(client timeout이 못 잡는 경우)에 대한 바깥쪽
+  # 안전망 역할만 한다.
   RealtimeLlmExtractFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -359,7 +372,7 @@ Resources:
       PackageType: Image
       ImageUri: !Ref LlmImageUri
       Role: !GetAtt RealtimeLlmExtractFunctionRole.Arn
-      Timeout: 180
+      Timeout: 600
       MemorySize: 1024
       ReservedConcurrentExecutions: 5
       Environment:
