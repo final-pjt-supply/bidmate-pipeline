@@ -16,7 +16,7 @@ Globals:
 Resources:
   HwpFunction:
     Type: AWS::Serverless::Function
-    Metadata: { Dockerfile: docker/hwp/Dockerfile, DockerContext: . }
+    Metadata: { Dockerfile: backfill_lambda/docker/hwp/Dockerfile, DockerContext: . }
     Properties:
       PackageType: Image
       Environment: { Variables: { ALLOWED_EXT: ".hwp,.hwpx" } }
@@ -26,7 +26,7 @@ Resources:
 
   HwpxFunction:
     Type: AWS::Serverless::Function
-    Metadata: { Dockerfile: docker/hwpx/Dockerfile, DockerContext: . }
+    Metadata: { Dockerfile: backfill_lambda/docker/hwpx/Dockerfile, DockerContext: . }
     Properties:
       PackageType: Image
       Environment: { Variables: { ALLOWED_EXT: .hwpx } }
@@ -36,7 +36,7 @@ Resources:
 
   PdfFunction:
     Type: AWS::Serverless::Function
-    Metadata: { Dockerfile: docker/pdf/Dockerfile, DockerContext: . }
+    Metadata: { Dockerfile: backfill_lambda/docker/pdf/Dockerfile, DockerContext: . }
     Properties:
       PackageType: Image
       Environment: { Variables: { ALLOWED_EXT: .pdf } }

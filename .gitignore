@@ -58,3 +58,4 @@ docs/
 # Sample data
 data/sample/*.pdf
 data/sample/output/
+batch-reports/
