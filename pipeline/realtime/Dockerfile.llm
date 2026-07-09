@@ -1,0 +1,26 @@
+# LLM 자격요건 추출 전용 이미지 (pdf/hwp/hwpx 추출기와 무관 — extractors/llm은
+# parsing/ 패키지에 의존하지 않아 그쪽 이미지와 분리해도 됨).
+# 빌드는 리포 루트에서:
+#   docker build --provenance=false --sbom=false -f pipeline/realtime/Dockerfile.llm -t bidding-agent-llm-extractor .
+# ⚠ --provenance=false --sbom=false 필수: 이거 없이 빌드하면 Docker BuildKit이 기본으로
+# OCI image index(멀티플랫폼 매니페스트 리스트 + attestation 서브매니페스트)를 만드는데,
+# Lambda는 이 포맷을 지원 안 하고 단일 Docker V2 Schema2 매니페스트만 받는다.
+FROM public.ecr.aws/lambda/python:3.13
+# Python 3.13: AWS Lambda가 공식 지원하는 최신 안정 런타임 — boto3/openai 둘 다 3.13과
+# 호환되고, 이 이미지엔 구버전 호환이 필요한 pymupdf/lxml/pyhwp 같은 패키지가 없어 최신
+# 버전을 막을 이유가 없다(가장 긴 보안 패치 기간 확보).
+
+COPY pipeline/realtime/requirements-llm.txt /tmp/requirements-llm.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-llm.txt
+
+# common/: config, paths, result, s3, sqs — extract_llm.py와 extractors/llm이 공유해서 쓴다.
+COPY pipeline/realtime/src/common/ ${LAMBDA_TASK_ROOT}/common/
+# extractors/__init__.py: extractors.llm을 패키지로 import하려면 부모 패키지가 있어야 함
+# (pdf/hwp/hwpx 추출기 본체는 이 이미지에 안 넣음 — extractors/llm이 그쪽을 import하지 않음).
+COPY pipeline/realtime/src/extractors/__init__.py ${LAMBDA_TASK_ROOT}/extractors/__init__.py
+COPY pipeline/realtime/src/extractors/llm/ ${LAMBDA_TASK_ROOT}/extractors/llm/
+# handlers/__init__.py: handlers.extract_llm을 패키지로 import하려면 필요.
+COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
+COPY pipeline/realtime/src/handlers/extract_llm.py ${LAMBDA_TASK_ROOT}/handlers/extract_llm.py
+
+CMD ["handlers.extract_llm.lambda_handler"]
