@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta
 from inspect import signature
 from pathlib import Path
@@ -25,6 +26,12 @@ except ImportError:
 PROJECT_DIR = os.environ.get("BIDDING_AGENT_HOME", str(Path(__file__).resolve().parents[1]))
 PYTHON_BIN = os.environ.get("BIDDING_AGENT_PYTHON", "python")
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
+
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+from daily_stats import update_hourly_stats as write_hourly_stats
+from daily_stats import write_5min_stats
 
 # 수집은 실제 공고 조회 창이므로 5분을 기본으로 둔다.
 COLLECT_MINUTES = int(os.environ.get("BIDDING_DAILY_COLLECT_MINUTES", "5"))
@@ -167,6 +174,22 @@ def download_daily_files(**context) -> None:
     run_script("json_file_download_daily.py", "--minutes", str(plan["downloadMinutes"]))
 
 
+def update_5min_stats(**context) -> dict:
+    """이번 DAG run의 5분 단위 첨부파일 다운로드 통계를 S3에 저장한다."""
+    plan = context["ti"].xcom_pull(task_ids="plan_window")
+    result = write_5min_stats(BUCKET_NAME, plan, context)
+    log.info("5분 통계 저장 완료: %s", json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def update_hourly_stats(**context) -> dict:
+    """5분 다운로드 통계를 hour 통계에 증분 반영하고, 정시에는 직전 hour를 확정한다."""
+    five_min_result = context["ti"].xcom_pull(task_ids="update_5min_stats")
+    result = write_hourly_stats(BUCKET_NAME, five_min_result, context)
+    log.info("1시간 통계 갱신 완료: %s", json.dumps(result, ensure_ascii=False))
+    return result
+
+
 def mark_success(**context) -> None:
     plan = context["ti"].xcom_pull(task_ids="plan_window")
     Variable.set(CURSOR_VAR, plan["windowEndIso"])
@@ -235,9 +258,23 @@ with DAG(**dag_kwargs) as dag:
         python_callable=download_daily_files,
     )
 
+    update_5min_stats_task = PythonOperator(
+        task_id="update_5min_stats",
+        python_callable=update_5min_stats,
+        # 다운로드 실패도 통계 JSON에 남겨야 하므로 upstream 완료 상태만 기다린다.
+        trigger_rule="all_done",
+    )
+
+    update_hourly_stats_task = PythonOperator(
+        task_id="update_hourly_stats",
+        python_callable=update_hourly_stats,
+    )
+
     mark_daily_success = PythonOperator(
         task_id="mark_success",
         python_callable=mark_success,
     )
 
-    plan_daily_window >> collect_daily_notices_task >> download_daily_files_task >> mark_daily_success
+    plan_daily_window >> collect_daily_notices_task >> download_daily_files_task
+    download_daily_files_task >> mark_daily_success
+    download_daily_files_task >> update_5min_stats_task >> update_hourly_stats_task

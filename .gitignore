@@ -7,7 +7,13 @@ venv/
 
 # 환경변수 / 비밀키
 .env
+.env.airflow
 *.key
+
+# 로컬 Airflow 테스트
+docker-compose.airflow.yml
+docker/airflow/
+airflow_logs/
 
 # OS
 .DS_Store
@@ -16,3 +22,6 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+
+# 로컬 검증 코드
+tests/
