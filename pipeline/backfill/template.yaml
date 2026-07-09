@@ -52,6 +52,17 @@ Resources:
                 Effect: Allow
                 Action: [s3:GetObject, s3:PutObject]
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/qualifications/*"
+              # 멱등 HeadObject: ListBucket이 없으면 없는 객체에 404 대신 403이 떠서
+              # object_exists가 Permanent로 오분류됨. backfill prefix로 스코프해 부여.
+              - Sid: ListBucketForHeadCheck
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - "extracted/downloads/backfill/*"
+                      - "qualifications/backfill/*"
 
   BackfillLlmFunction:
     Type: AWS::Serverless::Function
@@ -62,7 +73,7 @@ Resources:
       FunctionName: backfill-extract-llm
       PackageType: Image
       Role: !GetAtt BackfillLlmFunctionRole.Arn
-      Timeout: 180
+      Timeout: 600  # 긴 TTFT(서버측 지연)로 일부 건이 180초 초과 → 600으로 상향(Lambda 최대 900)
       MemorySize: 1024
       ReservedConcurrentExecutions: 5
       Environment:
@@ -87,14 +98,17 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [s3:GetObject]
+                Action: [s3:GetObject, s3:GetObjectVersion]  # 버전관리 버킷: S3 Batch가 매니페스트를 버전 고정해 읽음
                 Resource: !Sub arn:aws:s3:::${SourceBucketName}/manifests/*
               - Effect: Allow
                 Action: [s3:PutObject]
                 Resource: !Sub arn:aws:s3:::${SourceBucketName}/batch-reports/*
               - Effect: Allow
                 Action: [lambda:InvokeFunction]
-                Resource: !GetAtt BackfillLlmFunction.Arn
+                # S3 Batch가 :$LATEST 한정자로 호출하므로 unqualified + qualified(:*) 둘 다 허용
+                Resource:
+                  - !GetAtt BackfillLlmFunction.Arn
+                  - !Sub "${BackfillLlmFunction.Arn}:*"
 
 Outputs:
   BackfillLlmFunctionArn:
