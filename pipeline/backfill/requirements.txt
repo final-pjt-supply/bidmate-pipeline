@@ -1,2 +1,1 @@
-openai>=2,<3   # extractors/llm/client.py가 NVIDIA Build API(OpenAI 호환) 호출에 사용
-boto3    # backfill/s3.py + handler S3 접근
+boto3>=1.40   # bedrock-runtime(converse) + AWS_BEARER_TOKEN_BEDROCK 인증 + backfill S3. Lambda 베이스 번들이 옛 버전이라 최신으로 덮어씀

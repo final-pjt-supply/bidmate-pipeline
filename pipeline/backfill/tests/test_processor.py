@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "realtime" / "src"))
 
 from backfill import processor  # noqa: E402
-import openai  # noqa: E402
 
 BUCKET = "bidmate"
 KEY = (
@@ -27,16 +26,6 @@ EXTRACTED_DOC = json.dumps({
     "document_id": "doc01",
     "pages": [{"page": 1, "text": "2. 입찰참가자격 ..."}],
 }).encode("utf-8")
-
-
-class _FakeConnErr(openai.APIConnectionError):
-    def __init__(self):
-        pass  # bypass parent __init__ (needs a request); processor only isinstance-checks
-
-
-class _FakeStatusErr(openai.APIStatusError):
-    def __init__(self, status_code):
-        self.status_code = status_code  # processor only reads .status_code + isinstance
 
 
 def _patch(monkeypatch, *, exists=False, get_body=EXTRACTED_DOC, extract_ret=None,
@@ -125,19 +114,22 @@ def test_llm_schema_error_is_permanent(monkeypatch):
         processor.process_task(BUCKET, KEY)
 
 
-def test_llm_connection_error_is_temporary(monkeypatch):
-    _patch(monkeypatch, extract_exc=_FakeConnErr())
-    with pytest.raises(processor.TemporaryFailure):
-        processor.process_task(BUCKET, KEY)
-
-
-def test_llm_429_is_temporary(monkeypatch):
-    _patch(monkeypatch, extract_exc=_FakeStatusErr(429))
+def test_llm_throttling_is_temporary(monkeypatch):
+    err = ClientError({"Error": {"Code": "ThrottlingException"}}, "Converse")
+    _patch(monkeypatch, extract_exc=err)
     with pytest.raises(processor.TemporaryFailure):
         processor.process_task(BUCKET, KEY)
 
 
 def test_llm_5xx_is_temporary(monkeypatch):
-    _patch(monkeypatch, extract_exc=_FakeStatusErr(503))
+    err = ClientError({"Error": {"Code": "InternalServerException"}}, "Converse")
+    _patch(monkeypatch, extract_exc=err)
     with pytest.raises(processor.TemporaryFailure):
+        processor.process_task(BUCKET, KEY)
+
+
+def test_llm_validation_is_permanent(monkeypatch):
+    err = ClientError({"Error": {"Code": "ValidationException"}}, "Converse")
+    _patch(monkeypatch, extract_exc=err)
+    with pytest.raises(processor.PermanentFailure):
         processor.process_task(BUCKET, KEY)

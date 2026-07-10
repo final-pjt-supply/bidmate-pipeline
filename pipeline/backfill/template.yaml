@@ -10,21 +10,22 @@ Parameters:
     Type: String
     Default: bidmate
 
-  NvidiaApiKey:
+  BedrockApiKey:
     Type: String
     NoEcho: true
     Default: ""
     Description: >
-      NVIDIA Build API 키. Default에 넣지 말고 배포 시
-      `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`로 전달.
+      Bedrock API 키(bearer). Default에 넣지 말고 배포 시
+      `sam deploy --parameter-overrides BedrockApiKey=<실제키>`로 전달.
+      botocore가 AWS_BEARER_TOKEN_BEDROCK env로 자동 인증.
 
-  LlmBaseUrl:
+  BedrockRegion:
     Type: String
-    Default: "https://integrate.api.nvidia.com/v1"
+    Default: "us-east-1"
 
-  LlmModel:
+  BedrockModelId:
     Type: String
-    Default: "qwen/qwen3-next-80b-a3b-instruct"
+    Default: "qwen.qwen3-next-80b-a3b"
 
 Resources:
   BackfillLlmFunctionRole:
@@ -78,9 +79,9 @@ Resources:
       ReservedConcurrentExecutions: 5
       Environment:
         Variables:
-          NVIDIA_API_KEY: !Ref NvidiaApiKey
-          LLM_BASE_URL: !Ref LlmBaseUrl
-          LLM_MODEL: !Ref LlmModel
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          AWS_BEDROCK_REGION: !Ref BedrockRegion
+          AWS_BEARER_TOKEN_BEDROCK: !Ref BedrockApiKey
 
   BatchJobRole:
     Type: AWS::IAM::Role
