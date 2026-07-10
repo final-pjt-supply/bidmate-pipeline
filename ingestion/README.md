@@ -1,10 +1,13 @@
-# 나라장터 입찰공고 수집 파이프라인 (feat/raw-json-ingestion)
+# 나라장터 입찰공고 수집 파이프라인 (`ingestion/`)
 
 조달청 나라장터 OpenAPI(`BidPublicInfoService`)에서 TOP10 발주기관의 입찰공고를 수집해
 S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실제로 내려받아 S3에 저장하는
-**배치 수집 파이프라인**이다.
+**배치 수집 파이프라인**이다. EC2 위 Airflow가 5분마다 daily 파이프라인을 실행한다.
 
-## 1. 이 브랜치의 역할과 목표
+이 폴더는 자기완결적이다 — 코드, DAG, Dockerfile, docker-compose, 의존성, 테스트가 모두
+`ingestion/` 안에 있고, 저장소 루트의 파일에 의존하지 않는다.
+
+## 1. 이 폴더의 역할과 목표
 
 이 저장소가 최종적으로 지향하는 것은 **입찰공고 기반 조달 인텔리전스 시스템**이다:
 신규 공고가 들어오면 과거 수주 실적·제안서와 매칭해 Go/No-Go 판단을 돕고,
@@ -12,10 +15,10 @@ S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실�
 즉 VectorDB(OpenSearch) 구축으로 이어지는 데이터 파이프라인의 초입을 담당한다.
 
 ```text
-[이 브랜치]                                          [후속 브랜치/단계]
+[ingestion/]                                         [후속 단계]
 공고 JSON 수집 ──▶ 첨부파일 적재 ──▶ HWP→PDF 변환 ──▶ 파싱·청킹·임베딩 ──▶ OpenSearch 인덱싱
-(raw/curated)      (downloads)      (feat/hwp-to-pdf)  (feat/pdf-parsing-    (하이브리드 검색 +
-                                                        embedding)            RAG 서빙)
+(raw/curated)      (downloads)      (transforming/)   (parsing/,           (하이브리드 검색 +
+                                                       embedding/)          RAG 서빙)
 ```
 
 책임 범위는 명확히 두 가지다.
@@ -36,6 +39,7 @@ S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실�
 bidding-agent/ingestion/
 ├── institutions.py                    # 조회 대상 TOP10 기관 목록 (공용 상수)
 ├── schema.py                          # 원본 113필드 → curated 47필드 변환 (공용 순수 로직)
+├── attachment_rules.py                # 첨부 확장자 중복 제거 + S3 키 규칙 (공용)
 │
 ├── raw_json_daily.py                  # [daily]    최근 N분 공고 수집 (동기)
 ├── json_file_download_daily.py        # [daily]    최근 N분 curated의 첨부 다운로드 (동기)
@@ -43,10 +47,21 @@ bidding-agent/ingestion/
 ├── raw_json_backfill.py               # [backfill] 기간 지정 공고 수집 (비동기: httpx + aioboto3)
 ├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (비동기)
 │
+├── dags/bidding_daily_dag.py          # Airflow DAG — 5분마다 위 daily 스크립트 2종을 호출
+├── Dockerfile                         # apache/airflow:2.10.5 + requirements.txt
+├── docker-compose.yaml                # Airflow 단일 노드(LocalExecutor) + Postgres
+├── .env.example                       # 필요한 환경변수 목록 (복사해 .env 작성)
+│
+├── tests/                             # 첨부 다운로더 회귀 테스트 (pytest, 네트워크 미사용)
+├── pytest.ini                         # pythonpath=. / asyncio_mode=auto / testpaths=tests
+│
 ├── FIELD_DICTIONARY.md                # curated 47필드 명세 (schema.py와 1:1 동기화)
 ├── requirements.txt                   # requests, boto3, httpx, aioboto3 등 (Dockerfile이 설치)
 └── requirements-dev.txt               # pytest, pytest-asyncio
 ```
+
+> 저장소 루트의 `requirement.txt`, `Github_Convention.md`, `transforming/`, `README.md`는
+> main과 다른 브랜치의 소유다. 이 폴더의 작업에서 수정·삭제하지 않는다.
 
 ### 코드 의존성
 
@@ -114,7 +129,7 @@ s3://bidmate/raw/downloads/daily/_metadata/stats/  # daily 첨부 다운로드 5
 |---|---|---|
 | 목적 | "지금 입찰 가능한 공고"를 빠르게 반영 | 과거 기간의 공고 이력을 통째로 적재 |
 | 조회 창 | 최근 N분 (`--minutes`, 기본 5) | `--start`~`--end` 날짜 범위 |
-| 실행 주체 | 스케줄러(Airflow 전환 예정)가 5분마다 | 사람이 필요할 때 수동 실행 |
+| 실행 주체 | EC2 Airflow DAG(`bidding_daily_pipeline`)가 5분마다 | 사람이 필요할 때 수동 실행 |
 | **마감 공고 필터** | **적용** (`is_open`: 마감 지난 공고 제외) | **미적용** — 이력 수집이 목적이므로 마감된 공고도 전부 보존 |
 | 시간창 필터 | `in_window`: 게시시각이 조회창 안인 것만 | 없음 (날짜 범위 자체가 조건) |
 | 저장 단위 | 공고 1건 = 1 JSON | 공고 1건 = 1 JSON |
@@ -177,24 +192,33 @@ collect_range (날짜 루프)
 ### 환경 준비
 
 ```bash
-# 프로젝트 전용 가상환경 (공용 conda/시스템 파이썬에 직접 설치하지 말 것)
+# 저장소 루트에서. 프로젝트 전용 가상환경 (공용 conda/시스템 파이썬에 직접 설치하지 말 것)
 python3 -m venv .venv
 .venv/bin/python3 -m pip install -r ingestion/requirements.txt -r ingestion/requirements-dev.txt
 ```
 
-`.env` 파일 또는 환경변수 (`cp env.example .env` 후 값을 채우면 된다):
+환경변수는 `ingestion/.env`에 둔다 (`docker-compose.yaml`이 같은 폴더에서 읽는다):
+
+```bash
+cp ingestion/.env.example ingestion/.env   # 그다음 값을 채운다
+```
 
 ```bash
 G2B_SERVICE_KEY=<data.go.kr 디코딩 서비스키>   # 필수
 S3_BUCKET_NAME=bidmate                        # 생략 시 기본값 bidmate
-AWS_ACCESS_KEY_ID=...                         # IAM 역할 미사용 시
-AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=...
+# AWS 자격증명은 EC2에서 IAM 역할(instance profile)로 주입된다. 로컬 실행 시에만
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 를 채운다.
 ```
 
-### 실행
+`docker-compose.yaml`은 Postgres 접속정보(`POSTGRES_*`)와 Airflow 키
+(`AIRFLOW_FERNET_KEY`, `AIRFLOW_SECRET_KEY`)도 `.env`에서 읽는다. 하나라도 비면 기동에 실패한다.
+
+### 스크립트 직접 실행
 
 ```bash
+cd ingestion
+
 # ── daily (준실시간, 최근 5분) ──
 python3 raw_json_daily.py
 python3 json_file_download_daily.py
@@ -209,6 +233,31 @@ python3 raw_json_backfill.py --start 2026-06-01 --concurrency 5
 
 backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 종료 `0`(재개 안내 로그 출력) /
 일부 조합 실패 `1`(실패 조합이 로그에 남으므로 해당 범위만 재실행).
+
+### Airflow (EC2 운영 환경)
+
+`docker compose`는 반드시 `ingestion/` 안에서 실행한다. compose의 상대경로
+(`build: .`, `./dags`, `.:/opt/bidding-agent`)가 compose 파일이 있는 폴더 기준으로
+해석되기 때문이다.
+
+```bash
+cd ingestion
+docker compose up -d --build     # UI: http://<EC2-IP>:8080
+docker compose ps                # 컨테이너 상태
+docker compose down              # 중지
+```
+
+DAG는 `bidding_daily_pipeline`이며 `*/5 * * * *` 스케줄이다. DAG가 UI 목록에 없으면
+`./dags` 마운트를, import error가 나면 `BIDDING_AGENT_HOME` 경로를 먼저 의심한다.
+
+### 테스트
+
+```bash
+cd ingestion && ../.venv/bin/pytest    # 네트워크·AWS 접근 없음. 1초 내 완료
+```
+
+`pytest.ini`가 `pythonpath=.`(스크립트 import)와 `asyncio_mode=auto`(async 테스트 실행)를
+지정한다. 이 파일이 없으면 backfill의 async 테스트가 전부 실패하므로 삭제하지 않는다.
 
 ## 6. 알려진 이슈 / 주의사항
 
@@ -320,9 +369,29 @@ backfill의 종료 코드: 정상 완료 `0` / 호출 예산 도달로 조기 �
   중복이나 재처리가 운영상 문제가 되면 DB 상태 컬럼(`pending`/`downloaded`/`failed`)
   기반으로 전환한다.
 
+### 첨부 다운로더 회귀 테스트 복구 (2026-07-10)
+
+- 위 "파이프라인 일원화(2026-07-06)"에서 제거했던 `tests/`와 `pytest.ini`를 되살렸다.
+  백필·daily 다운로더의 실패 처리 버그를 고치면서 회귀 테스트를 다시 붙였기 때문이다.
+- 테스트가 못을 박는 동작: 다운로드 실패 시 **종료코드 1**(Airflow가 실패를 감지해야 함),
+  `head_object`의 403을 404로 오인해 전량 재다운로드하지 않을 것, 0바이트 객체(끊긴 업로드의
+  잔해) 재다운로드, 매니페스트 덮어쓰기 방지, 5xx 재시도 / 4xx 즉시 실패.
+- 전부 스텁(`FakeS3`, `MockTransport`) 기반이라 네트워크·AWS 없이 1초 내에 돈다.
+
+### ingestion/ 폴더로 이동 + 의존성 분리 (2026-07-11)
+
+- main이 도메인별 폴더(`pipeline/`, `parsing/`, `embedding/` …)로 구성되고 루트에는 설정·문서만
+  두는 구조라, 수집 파이프라인도 `ingestion/` 하위로 옮겨 같은 규칙을 따랐다.
+  (2026-07-06 항목의 "저장소 루트로 이동"은 이 결정으로 대체됐다.)
+- `docker-compose.yaml`을 코드와 **함께** 옮긴 덕에 compose의 상대경로가 그대로 유효해
+  yaml과 DAG 코드는 한 줄도 고치지 않았다. 대신 `.env`가 `ingestion/.env`로 이동해야 한다.
+- 의존성은 루트 `requirement.txt`에서 `ingestion/requirements.txt`로 분리했다. main이 이미
+  쓰는 규약(`pipeline/backfill/requirements.txt` 등)을 따른 것이며, 루트 파일을 양쪽이
+  고치지 않게 되어 main과의 병합 충돌이 사라졌다. `Dockerfile`도 하드코딩 대신 이 파일을 읽는다.
+
 ## 9. 다음 로드맵
 
 - daily 파이프라인의 비동기 전환 검토
-- Airflow DAG 전환: collect → download → parse → index 자동화
+- CI에서 `pytest` 실행 (현재 `.github/workflows/`에는 Gemini PR 리뷰만 있음)
 - OpenSearch 인덱스 설계 + Nori 형태소 분석기 적용
 - 하이브리드 검색(BM25 + 벡터) + 비즈니스 룰 re-ranking (후속 단계)
