@@ -6,8 +6,14 @@
 소유)와는 무관하다.
 
 실행(리포 루트에서, 사전에 db/에서 `docker compose up -d opensearch` 필요):
-    cd experiments/embedding && python index_to_opensearch.py
+    cd experiments/embedding && python index_to_opensearch.py [--index-name NAME]
+
+--index-name을 지정하지 않으면 기본 인덱스(embedding-experiment-chunks)를
+지우고 다시 만든다. 이전 결과와 나란히 비교하려면(예: 청킹 로직 변경 전/후)
+버전이 다른 이름(예: embedding-experiment-chunks-v2)을 지정해 기존 인덱스는
+그대로 두고 새 인덱스를 만든다.
 """
+import argparse
 import json
 from pathlib import Path
 
@@ -15,7 +21,7 @@ from opensearchpy import OpenSearch, helpers
 
 HOST = "localhost"
 PORT = 9200
-INDEX_NAME = "embedding-experiment-chunks"
+DEFAULT_INDEX_NAME = "embedding-experiment-chunks"
 VECTOR_DIM = 1024
 
 CHUNKS_PATH = Path(__file__).parent / "chunks" / "embedded_chunks.json"
@@ -59,18 +65,18 @@ def get_client() -> OpenSearch:
     )
 
 
-def create_index(client: OpenSearch) -> None:
-    if client.indices.exists(index=INDEX_NAME):
-        print(f"기존 인덱스 삭제: {INDEX_NAME}")
-        client.indices.delete(index=INDEX_NAME)
-    client.indices.create(index=INDEX_NAME, body=_INDEX_BODY)
-    print(f"인덱스 생성 완료: {INDEX_NAME} (dimension={VECTOR_DIM})")
+def create_index(client: OpenSearch, index_name: str) -> None:
+    if client.indices.exists(index=index_name):
+        print(f"기존 인덱스 삭제: {index_name}")
+        client.indices.delete(index=index_name)
+    client.indices.create(index=index_name, body=_INDEX_BODY)
+    print(f"인덱스 생성 완료: {index_name} (dimension={VECTOR_DIM})")
 
 
-def bulk_load(client: OpenSearch, chunks: list[dict]) -> None:
+def bulk_load(client: OpenSearch, chunks: list[dict], index_name: str) -> None:
     def _actions():
         for i, c in enumerate(chunks):
-            yield {"_index": INDEX_NAME, "_id": i, "_source": c}
+            yield {"_index": index_name, "_id": i, "_source": c}
 
     success, errors = helpers.bulk(client, _actions(), chunk_size=500, raise_on_error=False)
     print(f"적재 완료: 성공 {success}건, 실패 {len(errors)}건")
@@ -79,15 +85,19 @@ def bulk_load(client: OpenSearch, chunks: list[dict]) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="임베딩 청크를 로컬 OpenSearch에 적재")
+    parser.add_argument("--index-name", default=DEFAULT_INDEX_NAME, help="적재할 인덱스명(기존 결과 보존하려면 버전 구분된 이름 사용)")
+    args = parser.parse_args()
+
     chunks = json.loads(CHUNKS_PATH.read_text(encoding="utf-8"))
     print(f"입력 청크 수: {len(chunks)}")
 
     client = get_client()
-    create_index(client)
-    bulk_load(client, chunks)
+    create_index(client, args.index_name)
+    bulk_load(client, chunks, args.index_name)
 
-    client.indices.refresh(index=INDEX_NAME)
-    count = client.count(index=INDEX_NAME)["count"]
+    client.indices.refresh(index=args.index_name)
+    count = client.count(index=args.index_name)["count"]
     print(f"인덱스 내 문서 수(refresh 후): {count}")
 
 
