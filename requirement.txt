@@ -1,5 +1,1 @@
-requests
-boto3
-python-dotenv
-httpx
-aioboto3
+pywin32

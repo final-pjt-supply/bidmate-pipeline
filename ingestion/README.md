@@ -33,7 +33,7 @@ S3에 raw/curated JSON으로 적재하고, 공고 첨부문서(HWP/PDF)를 실�
 ### 폴더 구조
 
 ```text
-bidding-agent/
+bidding-agent/ingestion/
 ├── institutions.py                    # 조회 대상 TOP10 기관 목록 (공용 상수)
 ├── schema.py                          # 원본 113필드 → curated 47필드 변환 (공용 순수 로직)
 │
@@ -43,9 +43,9 @@ bidding-agent/
 ├── raw_json_backfill.py               # [backfill] 기간 지정 공고 수집 (비동기: httpx + aioboto3)
 ├── json_file_download_backfill.py     # [backfill] 기간 지정 첨부 다운로드 (비동기)
 │
-├── .github/                           # Gemini PR 자동 리뷰 워크플로우
 ├── FIELD_DICTIONARY.md                # curated 47필드 명세 (schema.py와 1:1 동기화)
-└── requirement.txt                    # requests, boto3, httpx, aioboto3 등
+├── requirements.txt                   # requests, boto3, httpx, aioboto3 등 (Dockerfile이 설치)
+└── requirements-dev.txt               # pytest, pytest-asyncio
 ```
 
 ### 코드 의존성
@@ -179,7 +179,7 @@ collect_range (날짜 루프)
 ```bash
 # 프로젝트 전용 가상환경 (공용 conda/시스템 파이썬에 직접 설치하지 말 것)
 python3 -m venv .venv
-.venv/bin/python3 -m pip install -r requirement.txt
+.venv/bin/python3 -m pip install -r ingestion/requirements.txt -r ingestion/requirements-dev.txt
 ```
 
 `.env` 파일 또는 환경변수 (`cp env.example .env` 후 값을 채우면 된다):
