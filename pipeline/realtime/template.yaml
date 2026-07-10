@@ -43,6 +43,13 @@ Parameters:
     Default: "qwen/qwen3-next-80b-a3b-instruct"
     Description: LLM 모델 이름.
 
+  AlertEmail:
+    Type: String
+    Default: "bidmatefinal@gmail.com"
+    Description: >
+      CloudWatch 알람(DLQ 적체 등) 통보를 받을 이메일. SNS 구독 방식이라 배포 후
+      해당 주소로 오는 확인 메일의 링크를 눌러야 실제로 알림이 도착하기 시작한다.
+
 Resources:
   # ============================================================
   # SQS — 4쌍(본큐+DLQ), 전부 Standard 큐.
@@ -142,6 +149,17 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ReadExtractedForDedupCheck
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ListBucketForDedupCheck
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix: "extracted/*"
         - PolicyName: realtime-extract-pdf-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -184,6 +202,17 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ReadExtractedForDedupCheck
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ListBucketForDedupCheck
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix: "extracted/*"
         - PolicyName: realtime-extract-hwp-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -226,6 +255,17 @@ Resources:
                 Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ReadExtractedForDedupCheck
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ListBucketForDedupCheck
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix: "extracted/*"
         - PolicyName: realtime-extract-hwpx-sqs-access
           PolicyDocument:
             Version: '2012-10-17'
@@ -386,16 +426,32 @@ Resources:
             BatchSize: 1
 
   # ============================================================
-  # CloudWatch 알람 — 전부 콘솔 확인용(AlarmActions 없음, 통보 없음).
+  # SNS — 알람 통보용. 2026-07-09~10 IAM 권한 누락 인시던트가 액션 없는
+  # 콘솔전용 알람 5개로는 못 잡혔던 것("울려도 무의미")에 대한 조치.
+  # ============================================================
+  RealtimeAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: realtime-pipeline-alerts
+      DisplayName: Realtime Pipeline Alerts
+
+  RealtimeAlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref RealtimeAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ============================================================
+  # CloudWatch 알람 — 전부 RealtimeAlertsTopic(SNS)으로 통보됨.
   # ============================================================
   RealtimeLlmExtractQueueBacklogAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: realtime-llm-extract-queue-backlog
       AlarmDescription: >
-        realtime-llm-extract-queue에 메시지가 15분 이상 100개를 초과해 쌓여있음
-        (콘솔 확인용, 액션 없음). ReservedConcurrentExecutions=5 제한 때문에
-        처리가 밀리고 있다는 신호.
+        realtime-llm-extract-queue에 메시지가 15분 이상 100개를 초과해 쌓여있음.
+        ReservedConcurrentExecutions=5 제한 때문에 처리가 밀리고 있다는 신호.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -407,12 +463,14 @@ Resources:
       Threshold: 100
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
 
   RealtimeExtractPdfDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: realtime-extract-pdf-queue-dlq-has-messages
-      AlarmDescription: realtime-extract-pdf-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      AlarmDescription: realtime-extract-pdf-queue-dlq에 메시지가 1개 이상 쌓임.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -424,12 +482,14 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
 
   RealtimeExtractHwpDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: realtime-extract-hwp-queue-dlq-has-messages
-      AlarmDescription: realtime-extract-hwp-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      AlarmDescription: realtime-extract-hwp-queue-dlq에 메시지가 1개 이상 쌓임.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -441,12 +501,14 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
 
   RealtimeExtractHwpxDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: realtime-extract-hwpx-queue-dlq-has-messages
-      AlarmDescription: realtime-extract-hwpx-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      AlarmDescription: realtime-extract-hwpx-queue-dlq에 메시지가 1개 이상 쌓임.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -458,12 +520,14 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
 
   RealtimeLlmExtractDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: realtime-llm-extract-queue-dlq-has-messages
-      AlarmDescription: realtime-llm-extract-queue-dlq에 메시지가 1개 이상 쌓임(콘솔 확인용, 액션 없음).
+      AlarmDescription: realtime-llm-extract-queue-dlq에 메시지가 1개 이상 쌓임.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -475,3 +539,32 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
+
+  # 2026-07-09~10 NVIDIA 산발적 500(약 9% 빈도, SQS 재시도로 흡수 중, DLQ 미증가)
+  # 조사 결과에 따른 조기 경고 알람. 위 has-messages 알람과 달리 절대 임계값이
+  # 아니라 "재시도로도 못 흡수할 만큼 악화"를 감지하는 게 목적. 조사 당시 잔존하던
+  # 9건(과거 NVIDIA 일시 장애 잔재)은 이 알람 설정 직전에 별도로 redrive해 비웠으므로
+  # 베이스라인 0 기준 5건 그대로 임계값으로 씀. 발동 시 NVIDIA 서빙처 이전을 재검토.
+  RealtimeLlmExtractDlqGrowthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-llm-extract-queue-dlq-growth-warning
+      AlarmDescription: >
+        realtime-llm-extract-queue-dlq에 메시지가 5개 이상 쌓임 — SQS
+        재시도(maxReceiveCount=3)로도 못 흡수할 만큼 NVIDIA 장애가 심해졌다는
+        조기 경고.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeLlmExtractDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
