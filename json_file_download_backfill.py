@@ -30,6 +30,10 @@ BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 CURATED_PREFIX = "raw/curated/backfill"
 FILES_PREFIX = "raw/downloads/backfill"
 DEFAULT_CONCURRENCY = 16
+MAX_RETRY = 3
+RETRY_BACKOFF_BASE = 2
+# 재시도해서 결과가 달라질 수 있는 상태코드만. 404/403 등은 다시 받아도 그대로다.
+RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 def day_suffixes(base: str, start_day: datetime, end_day: datetime):
@@ -66,6 +70,31 @@ async def iter_curated_range(s3, bucket: str, prefix: str, start_day: datetime, 
                             yield key, item
 
 
+def is_retryable(exc: Exception) -> bool:
+    """일시적 장애인가? 상태코드가 있으면 RETRYABLE_STATUS로, 없으면(타임아웃·연결 끊김) 재시도한다."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in RETRYABLE_STATUS
+    return True
+
+
+async def fetch_attachment(client, file_url: str, timeout: int):
+    """첨부 1건을 지수 백오프로 재시도하며 내려받는다.
+
+    수집 단계(raw_json_backfill.fetch_page)와 같은 정책을 다운로드 단계에도 적용한다.
+    수천 건을 받는 동안 일시적 네트워크 오류는 반드시 발생하는데, 재시도가 없으면
+    그 한 번의 실패가 곧 영구 손실이 된다.
+    """
+    for attempt in range(1, MAX_RETRY + 1):
+        try:
+            response = await client.get(file_url, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            if attempt == MAX_RETRY or not is_retryable(exc):
+                raise
+            await asyncio.sleep(RETRY_BACKOFF_BASE ** attempt)
+
+
 async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: int):
     dedup_reason = metadata.get("dedupDropped")
     if dedup_reason:
@@ -87,8 +116,7 @@ async def upload_attachment(s3, bucket: str, client, metadata: dict, timeout: in
             "downloadError": "fileUrl이 비어 있습니다.",
         }
 
-    response = await client.get(file_url, timeout=timeout)
-    response.raise_for_status()
+    response = await fetch_attachment(client, file_url, timeout)
 
     content_type = response.headers.get("Content-Type", "")
     key = file_s3_key(FILES_PREFIX, metadata, content_type, file_url)
@@ -121,14 +149,21 @@ def s3_session():
 
 async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> list:
     """다운로드 메타데이터를 각 공고의 bidNtceDt 기준 연/월로 묶어
-    downloads/year=Y/month=M/manifest.json에 저장한다.
+    downloads/year=Y/month=M/manifest/run_{실행시각}.jsonl에 저장한다.
 
     실행 시각(run_dt)이 아니라 공고 자체의 날짜로 묶는 이유: 백필은 실행일과
     수집 대상 기간이 다른 게 정상이라, 실행일 기준으로 쌓으면 어떤 데이터를
     처리한 매니페스트인지 헷갈린다. bidNtceDt가 없으면 run_dt로 대체한다.
-    같은 월을 여러 번 나눠 실행하면 이번 실행분으로 그 달의 manifest.json
-    전체가 교체된다(병합 아님).
+
+    실행마다 별도 파일을 쓰는 이유(추가 전용): 수집 단계가 호출 한도에 걸리면
+    "--start 2026-06-16 로 재실행하세요"라고 안내하므로, 한 달을 나눠 실행하는 것이
+    정상 사용 패턴이다. 월당 파일 하나를 put_object로 덮어쓰면 두 번째 실행이 첫
+    실행분 기록을 통째로 지운다(파일 실물은 S3에 남지만 매니페스트에서 사라진다).
+    기존 객체를 건드리지 않으면 이 손실이 구조적으로 불가능해진다.
+
+    소비하는 쪽은 해당 월 manifest/ 아래 *.jsonl을 전부 읽어 합쳐야 한다.
     """
+    run_id = f"{run_dt:%Y%m%dT%H%M%S}"
     by_month = {}
     for item in metadata:
         notice_dt = parse_dt(item.get("bidNtceDt")) or run_dt
@@ -136,18 +171,20 @@ async def put_manifest(s3, bucket: str, metadata: list, run_dt: datetime) -> lis
 
     keys = []
     for (year, month), items in by_month.items():
-        key = f"{FILES_PREFIX}/year={year:04d}/month={month:02d}/manifest.json"
+        key = f"{FILES_PREFIX}/year={year:04d}/month={month:02d}/manifest/run_{run_id}.jsonl"
+        body = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in items)
         await s3.put_object(
             Bucket=bucket,
             Key=key,
-            Body=json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8"),
-            ContentType="application/json; charset=utf-8",
+            Body=body.encode("utf-8"),
+            ContentType="application/x-ndjson; charset=utf-8",
         )
         keys.append(key)
     return keys
 
 
-async def run(args: argparse.Namespace) -> None:
+async def run(args: argparse.Namespace) -> int:
+    """다운로드를 수행하고 실패 건수를 반환한다 (0이면 전건 성공/건너뜀)."""
     session = s3_session()
     run_dt = datetime.now()
     extracted_at = run_dt.isoformat()
@@ -203,6 +240,7 @@ async def run(args: argparse.Namespace) -> None:
     for manifest_key in manifest_keys:
         print(f"[완료] 메타데이터 저장=s3://{args.bucket}/{manifest_key}")
     print(f"[완료] 다운로드 성공={success}건, 실패={failed}건, 건너뜀={skipped}건")
+    return failed
 
 
 def positive_int(value):
@@ -242,9 +280,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     try:
-        asyncio.run(run(parse_args()))
+        failed = asyncio.run(run(parse_args()))
     except Exception as exc:
         raise SystemExit(f"실패: {exc}") from None
+
+    # 다운로드 실패는 종료코드로 드러나야 한다. 그러지 않으면 셸의 `&&`도,
+    # 앞으로 붙일 Airflow도 전건 실패한 실행을 성공으로 취급한다.
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
