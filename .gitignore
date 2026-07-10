@@ -67,3 +67,9 @@ data/sample/output/
 experiments/embedding/data/
 experiments/embedding/chunks/
 experiments/embedding/vectors/
+# eval_set.json(확정된 평가셋)은 커밋하되, split_eval_set.py로 재생성되는
+# 튜닝/검증 분할과 run_recall_eval.py의 스윕 원시 결과는 재현 가능한
+# 산출물이라 추적하지 않는다.
+experiments/embedding/eval_set_tune.json
+experiments/embedding/eval_set_val.json
+experiments/embedding/*_sweep_results.json
