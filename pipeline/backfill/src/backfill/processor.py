@@ -7,7 +7,8 @@ realtime handlers/extract_llm.py의 _process와 같은 일을 하되:
 - 실패를 Permanent/Temporary로 분류해 S3 Batch 재시도에 위임한다(DB 미연동)
 - 출력 키가 이미 있으면 skip(멱등)
 
-extract는 realtime extractors/llm를 Dockerfile로 read-only COPY한 것을 재사용한다.
+LLM 추출은 backfill.llm_bedrock(Bedrock Converse) 경로를 쓴다. prompt/schema/preprocess는
+realtime extractors/llm를 Dockerfile로 read-only COPY해 재사용한다.
 """
 import json
 import logging
@@ -15,13 +16,18 @@ import logging
 from botocore.exceptions import BotoCoreError, ClientError
 
 from backfill import s3
+from backfill.llm_bedrock import extract
 from backfill.paths import extracted_backfill_key_to_qualifications_key
-from extractors.llm.extractor import extract
 
 logger = logging.getLogger(__name__)
 
 _S3_TEMPORARY_CODES = {"SlowDown", "ServiceUnavailable", "InternalError",
                        "RequestTimeout", "ThrottlingException", "503"}
+
+# Bedrock converse의 일시적 오류(스로틀·용량·서버측). 나머지 ClientError는 영구.
+_LLM_TEMPORARY_CODES = {"ThrottlingException", "ServiceUnavailableException",
+                        "ModelTimeoutException", "InternalServerException",
+                        "ModelNotReadyException", "ServiceQuotaExceededException"}
 
 
 class PermanentFailure(Exception):
@@ -42,16 +48,15 @@ def _raise_s3_failure(e: Exception):
 
 
 def _raise_llm_failure(e: Exception):
-    """LLM 호출 오류 분류. openai 5xx/429/타임아웃/연결은 일시적, 나머지(스키마 등)는 영구."""
-    try:
-        import openai
-    except ImportError:
-        raise PermanentFailure(f"llm error: {type(e).__name__}")
-    if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
-        raise TemporaryFailure(f"llm transient: {type(e).__name__}")
-    if isinstance(e, openai.APIStatusError) and (e.status_code == 429 or e.status_code >= 500):
-        raise TemporaryFailure(f"llm transient: {e.status_code}")
-    raise PermanentFailure(f"llm error: {type(e).__name__}")
+    """Bedrock 호출 오류 분류. 스로틀·용량·서버측 5xx는 일시적, 나머지(검증·스키마 등)는 영구."""
+    if isinstance(e, ClientError):
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in _LLM_TEMPORARY_CODES:
+            raise TemporaryFailure(f"llm transient: {code}")
+        raise PermanentFailure(f"llm error: {code}")
+    if isinstance(e, BotoCoreError):
+        raise TemporaryFailure(f"llm transient: {type(e).__name__}")  # 전송 계층 → 일시적
+    raise PermanentFailure(f"llm error: {type(e).__name__}")  # 스키마 파싱 등 → 영구
 
 
 def process_task(bucket: str, key: str) -> str:
