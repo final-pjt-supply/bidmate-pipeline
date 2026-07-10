@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.pytest_cache/
 
 # 환경변수 / 비밀키
 .env
@@ -22,6 +23,3 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
-
-# 로컬 검증 코드
-tests/
