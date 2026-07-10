@@ -52,12 +52,8 @@ bidding-agent/ingestion/
 ├── docker-compose.yaml                # Airflow 단일 노드(LocalExecutor) + Postgres
 ├── .env.example                       # 필요한 환경변수 목록 (복사해 .env 작성)
 │
-├── tests/                             # 첨부 다운로더 회귀 테스트 (pytest, 네트워크 미사용)
-├── pytest.ini                         # pythonpath=. / asyncio_mode=auto / testpaths=tests
-│
 ├── FIELD_DICTIONARY.md                # curated 47필드 명세 (schema.py와 1:1 동기화)
-├── requirements.txt                   # requests, boto3, httpx, aioboto3 등 (Dockerfile이 설치)
-└── requirements-dev.txt               # pytest, pytest-asyncio
+└── requirements.txt                   # requests, boto3, httpx, aioboto3 등 (Dockerfile이 설치)
 ```
 
 > 저장소 루트의 `requirement.txt`, `Github_Convention.md`, `transforming/`, `README.md`는
@@ -194,7 +190,7 @@ collect_range (날짜 루프)
 ```bash
 # 저장소 루트에서. 프로젝트 전용 가상환경 (공용 conda/시스템 파이썬에 직접 설치하지 말 것)
 python3 -m venv .venv
-.venv/bin/python3 -m pip install -r ingestion/requirements.txt -r ingestion/requirements-dev.txt
+.venv/bin/python3 -m pip install -r ingestion/requirements.txt
 ```
 
 환경변수는 `ingestion/.env`에 둔다 (`docker-compose.yaml`이 같은 폴더에서 읽는다):
@@ -249,15 +245,6 @@ docker compose down              # 중지
 
 DAG는 `bidding_daily_pipeline`이며 `*/5 * * * *` 스케줄이다. DAG가 UI 목록에 없으면
 `./dags` 마운트를, import error가 나면 `BIDDING_AGENT_HOME` 경로를 먼저 의심한다.
-
-### 테스트
-
-```bash
-cd ingestion && ../.venv/bin/pytest    # 네트워크·AWS 접근 없음. 1초 내 완료
-```
-
-`pytest.ini`가 `pythonpath=.`(스크립트 import)와 `asyncio_mode=auto`(async 테스트 실행)를
-지정한다. 이 파일이 없으면 backfill의 async 테스트가 전부 실패하므로 삭제하지 않는다.
 
 ## 6. 알려진 이슈 / 주의사항
 
@@ -369,16 +356,13 @@ cd ingestion && ../.venv/bin/pytest    # 네트워크·AWS 접근 없음. 1초 �
   중복이나 재처리가 운영상 문제가 되면 DB 상태 컬럼(`pending`/`downloaded`/`failed`)
   기반으로 전환한다.
 
-### 첨부 다운로더 회귀 테스트 복구 (2026-07-10)
+### 첨부 다운로더 회귀 테스트 제거 (2026-07-11)
 
-- 위 "파이프라인 일원화(2026-07-06)"에서 제거했던 `tests/`와 `pytest.ini`를 되살렸다.
-  백필·daily 다운로더의 실패 처리 버그를 고치면서 회귀 테스트를 다시 붙였기 때문이다.
-- 테스트가 못을 박는 동작: 다운로드 실패 시 **종료코드 1**(Airflow가 실패를 감지해야 함),
-  `head_object`의 403을 404로 오인해 전량 재다운로드하지 않을 것, 0바이트 객체(끊긴 업로드의
-  잔해) 재다운로드, 매니페스트 덮어쓰기 방지, 5xx 재시도 / 4xx 즉시 실패.
-- 전부 스텁(`FakeS3`, `MockTransport`) 기반이라 네트워크·AWS 없이 1초 내에 돈다.
-
-### ingestion/ 폴더로 이동 + 의존성 분리 (2026-07-11)
+- `tests/`, `pytest.ini`, `requirements-dev.txt`(pytest 전용 의존성)를 제거해 브랜치를
+  경량화했다. 검증하던 동작(다운로드 실패 시 종료코드 1, `head_object` 403/404 구분,
+  0바이트 객체 재다운로드, 매니페스트 보존, 5xx 재시도)의 **로직 자체는 소스코드에 그대로
+  있다** — 예: `json_file_download_backfill.py`의 `main()`이 `if failed: raise SystemExit(1)`.
+  회귀 방지 테스트만 걷어낸 것이므로, 이후 이 로직을 수정할 때는 수동 확인이 필요하다.
 
 - main이 도메인별 폴더(`pipeline/`, `parsing/`, `embedding/` …)로 구성되고 루트에는 설정·문서만
   두는 구조라, 수집 파이프라인도 `ingestion/` 하위로 옮겨 같은 규칙을 따랐다.
@@ -392,6 +376,5 @@ cd ingestion && ../.venv/bin/pytest    # 네트워크·AWS 접근 없음. 1초 �
 ## 9. 다음 로드맵
 
 - daily 파이프라인의 비동기 전환 검토
-- CI에서 `pytest` 실행 (현재 `.github/workflows/`에는 Gemini PR 리뷰만 있음)
 - OpenSearch 인덱스 설계 + Nori 형태소 분석기 적용
 - 하이브리드 검색(BM25 + 벡터) + 비즈니스 룰 re-ranking (후속 단계)
