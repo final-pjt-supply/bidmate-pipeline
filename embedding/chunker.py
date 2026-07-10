@@ -7,11 +7,13 @@ logger = logging.getLogger(__name__)
 # 로그 레벨 원칙 — 이 구조는 나중에 Lambda로 승격돼도 CloudWatch로 그대로 이어진다.
 # "사람이 봐야 하는 것은 WARNING 이상" — DEBUG/INFO는 정상 동작 기록이라 평소엔
 # 안 봐도 되고, WARNING부터는 데이터 품질이나 설계 가정(조항 구조가 있을 것,
-# 표가 임베딩 한도 안에 들 것 등)이 깨졌다는 신호다.
+# 표가 청크 하나에 다 들어갈 것 등)이 깨졌다는 신호다.
 #   DEBUG   — 분할·병합 세부 동작(섹션/하위항목 경계 수, 슬라이딩 윈도우 청크 생성 등)
-#   INFO    — 문서 단위 요약(청크 수/truncated/dropped)
-#   WARNING — 표/박스 잘림(원본·유지 길이), 잔재 청크 드랍(드랍된 원문 포함),
-#             조항 인식 실패(구조 분할이 안 먹혀 슬라이딩 윈도우로 강제 폴백)
+#   INFO    — 문서 단위 요약(청크 수/dropped)
+#   WARNING — 표/박스가 한도 초과로 여러 청크에 분할됨(원본 길이·분할 개수 — 데이터
+#             손실은 없지만 한 표가 여러 벡터로 쪼개진다는 신호), 잔재 청크 드랍
+#             (드랍된 원문 포함), 조항 인식 실패(구조 분할이 안 먹혀 슬라이딩
+#             윈도우로 강제 폴백)
 
 MAX_TOKENS = 512
 MIN_TOKENS = 30        # 이보다 짧은 텍스트 청크는 다음 청크와 병합
@@ -47,7 +49,7 @@ def chunk(text: str, source: str = "") -> list[dict]:
     chunks = []
     for item_text, item_type in raw:
         if item_type in ('table', 'box'):
-            chunks.append(_build_block_chunk(item_text, item_type, source))
+            chunks.extend(_split_block(item_text, item_type, source))
         else:
             chunks.extend(_split_text(item_text, source))
 
@@ -57,37 +59,29 @@ def chunk(text: str, source: str = "") -> list[dict]:
     result = []
     for i, c in enumerate(chunks):
         if c['text'].strip():
-            entry = {
+            result.append({
                 'chunk_idx': i,
                 'type': c['type'],
                 'text': c['text'],
                 'source': source,
-            }
-            if 'truncated' in c:
-                entry['truncated'] = c['truncated']
-                if c['truncated']:
-                    entry['original_chars'] = c['original_chars']
-                    entry['kept_chars'] = c['kept_chars']
-            result.append(entry)
+            })
 
-    truncated_count = sum(1 for c in result if c.get('truncated'))
     violation_count = _check_invariants(result, source)
     logger.info(
-        "청킹 완료: source=%s chunks=%d truncated=%d dropped=%d 불변식위반=%d",
-        source, len(result), truncated_count, dropped_count, violation_count,
+        "청킹 완료: source=%s chunks=%d dropped=%d 불변식위반=%d",
+        source, len(result), dropped_count, violation_count,
     )
 
     return result
 
 
 def _check_invariants(result: list[dict], source: str) -> int:
-    """truncated 표시된 표/박스 청크(잘림 안내 문구가 붙어 MAX_CHARS를 살짝 넘는
-    게 정상)를 제외한 모든 청크가 MAX_CHARS 이내인지 확인한다. 위반은 병합/분할
-    로직의 버그를 뜻하므로(정상 흐름에서는 나올 수 없어야 함) WARNING으로 남긴다."""
+    """모든 청크가 MAX_CHARS 이내인지 확인한다. 표/박스도 이제 절단 없이 행 단위로
+    분할하므로 원칙적으로 전부 한도 이내여야 한다 — 유일한 예외는 행 하나가 그
+    자체로 MAX_CHARS를 넘는 경우(행을 반토막 낼 수 없어 불가피하게 그 행만
+    단독 청크가 됨). 위반은 병합/분할 로직의 버그를 뜻하므로 WARNING으로 남긴다."""
     violations = 0
     for c in result:
-        if c.get('truncated'):
-            continue
         if len(c['text']) > MAX_CHARS:
             violations += 1
             logger.warning(
@@ -103,55 +97,51 @@ def _check_invariants(result: list[dict], source: str) -> int:
     return violations
 
 
-def _build_block_chunk(text: str, item_type: str, source: str) -> dict:
-    """표/박스는 원자 블록이라 절대 안 쪼갠다 — 행/열 구조가 잘리면 의미가 깨지기 때문.
-    다만 MAX_CHARS(768자, ≈512토큰)를 넘으면 임베딩 시 뒷부분이 어차피 잘려나간다
-    (embedder.py의 max_length=512는 토크나이저가 앞부분만 남기고 뒷부분을 조용히
-    버리는 hard truncation — 에러 없이 그냥 사라짐).
+def _split_block(text: str, item_type: str, source: str) -> list[dict]:
+    """표/박스를 행(줄) 단위로 순차 분할한다 — 위에서부터 줄을 채우다가 다음 줄을
+    더하면 MAX_CHARS를 넘는 지점에서 끊고 새 청크를 시작한다. 어떤 행도 중간에서
+    잘리지 않는다(행 하나가 그 자체로 MAX_CHARS를 넘는 극단적인 경우만 예외 —
+    그 행만 단독으로 초과 청크가 됨, 반토막 내는 것보다는 낫다).
 
-    표 내용의 축자 검색(모델명 등)은 SQL 영역, 벡터 검색은 의미 단위 담당 —
-    따라서 대형 표는 존재·성격 전달용 앞부분만 임베딩한다. 잘림은 truncated
-    메타로 추적한다(원문 전체는 여기서 버리지 않고 raw 데이터에 그대로 남아있으므로
-    필요하면 SQL 등 다른 경로로 찾아갈 수 있다).
+    오버랩을 두지 않는다(텍스트 폴백용 _sliding_window와의 차이) — 표는 각 행이
+    독립된 데이터라 경계에서 앞 청크 마지막 행을 다음 청크 앞에도 반복하면 같은
+    행이 중복 매칭되기만 하고 문맥 보강 효과가 없다(프로즈와 다름).
+
+    표는 원자 블록이 원칙이라 쪼개면 한 표가 여러 벡터로 나뉘어 개별 청크 하나가
+    표 전체 맥락을 담지 못하게 된다는 트레이드오프가 있다. 다만 이전의 "앞부분만
+    남기고 잘라버리는" 방식과 달리 전체 내용이 어떤 청크로든 보존되므로(데이터
+    손실 없음), 모델명 등 축자 검색은 여전히 SQL 등 원문 조회가 더 정확하지만
+    벡터 검색으로도 표의 어느 부분이든 찾을 수 있다.
     """
     text = text.strip()
-    if len(text) <= MAX_CHARS:
-        return {'text': text, 'type': item_type, 'truncated': False}
-
-    original_chars = len(text)
-    body = _truncate_block_body(text)
-    truncated_text = f'{body}\n[표 일부 — 전체 내용은 원문 참조]'
-    logger.warning(
-        "표/박스 청크 잘림: source=%s original=%d자 kept=%d자",
-        source, original_chars, len(body),
-        extra={
-            'event': 'block_truncated',
-            'source': source,
-            'original_chars': original_chars,
-            'kept_chars': len(body),
-        },
-    )
-    return {
-        'text': truncated_text,
-        'type': item_type,
-        'truncated': True,
-        'original_chars': original_chars,
-        'kept_chars': len(body),
-    }
-
-
-def _truncate_block_body(text: str) -> str:
-    """MAX_CHARS 이내로, 마지막 완전한 행(줄) 기준으로 자른다(행 중간에서 안 끊음)."""
     lines = text.split('\n')
-    kept: list[str] = []
-    total = 0
+    chunks = []
+    current: list[str] = []
     for line in lines:
-        extra = len(line) + (1 if kept else 0)  # 이미 있는 줄과 합칠 개행 1자
-        if kept and total + extra > MAX_CHARS:
-            break
-        kept.append(line)
-        total += extra
-    return '\n'.join(kept).rstrip()
+        candidate_len = len('\n'.join(current + [line]))
+        if candidate_len > MAX_CHARS and current:
+            chunk_text = '\n'.join(current).strip()
+            if chunk_text:
+                chunks.append({'text': chunk_text, 'type': item_type})
+            current = []
+        current.append(line)
+    if current:
+        chunk_text = '\n'.join(current).strip()
+        if chunk_text:
+            chunks.append({'text': chunk_text, 'type': item_type})
+
+    if len(chunks) > 1:
+        logger.warning(
+            "표/박스 청크 분할: source=%s original=%d자 %d개 청크로 분할",
+            source, len(text), len(chunks),
+            extra={
+                'event': 'block_split',
+                'source': source,
+                'original_chars': len(text),
+                'chunk_count': len(chunks),
+            },
+        )
+    return chunks
 
 
 def _extract_raw(text: str) -> list[tuple[str, str]]:

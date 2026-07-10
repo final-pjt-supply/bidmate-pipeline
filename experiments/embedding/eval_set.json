@@ -1,0 +1,1002 @@
+[
+  {
+    "query": "관용차량 구매 다수공급자계약 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01551048_001"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "완성차 제조사 등록 없이 공급업체로만 들어갈 수 있는 자동차 납품 건 있나",
+    "answer_bid_id": [
+      "R26BK01551048_001"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 승용차·승합차 MAS 건 계약기간이 얼마나 되지? 녹색인증 서류도 필요한가",
+    "answer_bid_id": [
+      "R26BK01551048_001"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학교 신축 관련 통신 공사 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01608505_001",
+      "R26BK01624544_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": "아라3중학교_신축_정보통신공사"
+  },
+  {
+    "query": "중학교 정보통신공사 하나 취소됐다고 들었는데 사유가 뭐였는지 확인 가능해?",
+    "answer_bid_id": [
+      "R26BK01608505_001"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": "아라3중학교_신축_정보통신공사"
+  },
+  {
+    "query": "고압 전력케이블 납품 공고 찾고 있어",
+    "answer_bid_id": [
+      "R26BK01610832_001"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "특고압 케이블 제조업체면 참여 가능한 공고 있어?",
+    "answer_bid_id": [
+      "R26BK01610832_001"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 방사광가속기 관련 케이블 납품 건 낙찰하한율 정정됐다던데, 사업금액이 얼마였지",
+    "answer_bid_id": [
+      "R26BK01610832_001"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학교 복합시설 짓는 건설사업관리 감리 용역 공고 찾아줘",
+    "answer_bid_id": [
+      "R26BK01620050_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "건설사업관리 감리 용역 중에 전북 지역업체 가점 있는 공고 있나",
+    "answer_bid_id": [
+      "R26BK01620050_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "남원 쪽 학교단지 짓는 감리용역 개찰일이 언제야, 용역금액도 알려줘",
+    "answer_bid_id": [
+      "R26BK01620050_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "도시개발 관련 사후환경영향조사 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01620154_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "환경영향평가 대행업체면 참여 가능한 조사 용역 있어?",
+    "answer_bid_id": [
+      "R26BK01620154_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "아산 쪽 도시개발사업 환경조사 용역 수행기간이 몇 년이나 되지?",
+    "answer_bid_id": [
+      "R26BK01620154_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "교육시설 증축공사 건설사업관리 용역 뭐 있나",
+    "answer_bid_id": [
+      "R26BK01620445_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "대구 지역업체 아니어도 참여 가능한 감리 용역인가? 지역업체 가점은 어떻게 되나",
+    "answer_bid_id": [
+      "R26BK01620445_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "포항에 있는 그 수련원 안전체험관 증축 감리 용역 예정금액이 얼마였지, 용역기간도 알려줘",
+    "answer_bid_id": [
+      "R26BK01620445_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "해양 경비 관련 시스템 구축 용역 공고 있나",
+    "answer_bid_id": [
+      "R26BK01620506_001"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "정보시스템 개발 사업자로 참여 가능한 해경 관련 용역인가",
+    "answer_bid_id": [
+      "R26BK01620506_001"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "해경 그 시스템 구축 용역 건 왜 취소됐대? 다시 공고 나온대?",
+    "answer_bid_id": [
+      "R26BK01620506_001"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "도로 포장 관련 연구용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01621346_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학술연구용역 업종 등록해야 참여 가능한 국토부 연구 용역인가",
+    "answer_bid_id": [
+      "R26BK01621346_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "도로포장 기준 다시 만드는 연구 용역 예산이랑 계약기간이 어떻게 되지",
+    "answer_bid_id": [
+      "R26BK01621346_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "개인정보영향평가 관련 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01621591_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "개인정보 영향평가기관으로 등록돼 있어야 참여 가능한 공고 있나, 중소기업만 되는 건가",
+    "answer_bid_id": [
+      "R26BK01621591_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 고용정보원 개인정보평가 사업 납품기한이 며칠이었지?",
+    "answer_bid_id": [
+      "R26BK01621591_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "복합재료 해석 시뮬레이션 소프트웨어 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01622057_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "대기업은 못 들어가고 중소·중견만 참여 가능한 소프트웨어 납품 건인가",
+    "answer_bid_id": [
+      "R26BK01622057_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "울산과기원 그 시뮬레이션 솔루션 구매 건 하자보증기간이랑 사업금액이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01622057_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "자율주행 관련 포럼 운영 용역 공고 찾고 있어",
+    "answer_bid_id": [
+      "R26BK01622081_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학술연구용역 등록업체면 참여 가능한 포럼 운영 사업인가",
+    "answer_bid_id": [
+      "R26BK01622081_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 자율주행 포럼 운영 용역 납품기한이랑 예산이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01622081_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "복합재 성형공정 해석 프로그램 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01622272_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "소프트웨어사업자 등록한 중소기업만 참여 가능한 공고인가, 대기업은 안되는 건인가",
+    "answer_bid_id": [
+      "R26BK01622272_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 복합재 최적화 소프트웨어 구매 건 사업금액이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01622272_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학교 신축 전기공사 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01622715_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "전기공사업 면허 있으면 참여 가능한 학교공사인가, 경남 지역업체 아니면 못 하나",
+    "answer_bid_id": [
+      "R26BK01622715_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 중학교 전기공사 건 공사기간이랑 추정금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01622715_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "스피커 앰프 상태 감시하는 방송시스템 관련 공고 있나",
+    "answer_bid_id": [
+      "R26BK01622877_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "우수조달물품 인증받은 방송장비면 수의계약으로 납품 가능한가",
+    "answer_bid_id": [
+      "R26BK01622877_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "그 스피커 감시 방송시스템 특허가 몇 개나 있었지, ICT품질인증도 받은거 맞나?",
+    "answer_bid_id": [
+      "R26BK01622877_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "화학물질 확산평가 모델 개발 관련 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01622921_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "직접생산확인증명서 있어야 참여 가능한 정보시스템 개발 용역인가",
+    "answer_bid_id": [
+      "R26BK01622921_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 KORA 개선 연구 건 납품기한이랑 사업금액이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01622921_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "군부대 의료장비 CT 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01622995_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "의료기기판매업 등록에 방사선발생장치 허가까지 있어야 참여 가능한 CT 구매 건인가",
+    "answer_bid_id": [
+      "R26BK01622995_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 육군 CT 장비 구매 건 하자보증기간이랑 사업금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01622995_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "대학교 시설 관련 건설사업관리 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623003_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "건설엔지니어링업 등록업체면 참여 가능한 대학 시설 감리 용역인가",
+    "answer_bid_id": [
+      "R26BK01623003_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "공주대 시설개선 민자사업 감리 용역 기간이랑 용역금액이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623003_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "고속도로 타당성조사 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623039_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02,doc03,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "타당성평가 대행자로 등록해야 참여 가능한 도로건설 조사 용역인가",
+    "answer_bid_id": [
+      "R26BK01623039_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02,doc03,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "그 서울-양평 고속도로 조사 용역 기간이랑 용역예정금액이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623039_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02,doc03,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "국도 터널 전기시설 공사 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623172_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "전기공사업 등록업체면 참여 가능한 터널 공사인가, 강원 지역업체 아니어도 되나",
+    "answer_bid_id": [
+      "R26BK01623172_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "그 강원권 터널 전기공사 건 공사기간이랑 추정금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01623172_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "콘텐츠관리 소프트웨어(CMS) 관련 조달 계약 건 있나",
+    "answer_bid_id": [
+      "R26BK01623261_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc04,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "우수품질 소프트웨어 인증 받은 중소기업 제품이면 수의계약으로 납품 가능한 건가",
+    "answer_bid_id": [
+      "R26BK01623261_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc04,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "군용 방한용품 제조 납품 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623282_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "섬유·의복 기술인력 15명 이상 있어야 참여 가능한 군수품 제조 건인가",
+    "answer_bid_id": [
+      "R26BK01623282_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 공군 방한용 각반 제조 건 납품기한이랑 수량이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623282_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "군 장병용 원격진료 시스템 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01623284_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "정보통신공사업이랑 의료기기 업종 다 등록해야 참여 가능한 원격진료 장비 구매 건인가",
+    "answer_bid_id": [
+      "R26BK01623284_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 해군 원격진료시스템 구매 건 납품기한이랑 수량이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623284_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "대학 일자리 정책 관련 만족도 조사 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623378_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학술연구용역 등록업체면 참여 가능한 정책 체감도 조사 용역인가",
+    "answer_bid_id": [
+      "R26BK01623378_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 대학일자리센터 만족도 조사 사업 납품기한이랑 예산이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01623378_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "국제 학술행사 개최 운영 용역 공고 있나",
+    "answer_bid_id": [
+      "R26BK01623468_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "대기업은 참여 제한되는 행사운영 용역인가",
+    "answer_bid_id": [
+      "R26BK01623468_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "그 우주환경 국제행사 개최 용역 소요예산이랑 행사 일정이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623468_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "딥페이크 영상 탐지 소프트웨어 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01623573_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "정부조달 등록업체면 참여 가능한 딥페이크 탐지 SW 라이선스 구매 건인가",
+    "answer_bid_id": [
+      "R26BK01623573_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "그 딥페이크 탐지 SW 라이선스 갱신 건 사업금액이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623573_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "법원 관련 X-ray 검색장비 구매 공고 있나",
+    "answer_bid_id": [
+      "R26BK01623742_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "방사선발생장치 허가 있는 중소기업이면 참여 가능한 엑스레이 장비 구매 건인가",
+    "answer_bid_id": [
+      "R26BK01623742_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 서울회생법원 엑스레이 투시기 구매 건 수량이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01623742_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "문화행사 운영대행 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623760_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "행사대행업 등록에 직접생산확인증명서까지 있어야 참여 가능한 문학축제 운영 용역인가",
+    "answer_bid_id": [
+      "R26BK01623760_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 아시아문학축제 운영 용역 납품기한이랑 사업금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01623760_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "철도 배수시설 개량공사 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01623782_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02,doc03,doc04,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "특허공법 적용된 전문공사인데 어떤 업종 등록업체가 참여 가능한 건가",
+    "answer_bid_id": [
+      "R26BK01623782_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02,doc03,doc04,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "그 호남선 배수시설 개량공사 구간이 몇 km이고 몇 개소나 되지?",
+    "answer_bid_id": [
+      "R26BK01623782_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02,doc03,doc04,doc05",
+    "same_project_group": null
+  },
+  {
+    "query": "단열 창호 관련 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624022_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "우수조달물품 지정된 창호 제품이면 수의계약 가능한 건가",
+    "answer_bid_id": [
+      "R26BK01624022_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 레일 조립식 창호 열관류율이랑 기밀등급이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624022_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "철도역 승강장 CCTV 설치공사 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624063_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "그 김천역 승강장 CCTV 공사 위험작업 등급이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624063_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "정보보호 지원센터 운영 관련 교육 용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01624091_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "경남 소재 업체만 참여 가능한 정보보호 운영지원 용역인가",
+    "answer_bid_id": [
+      "R26BK01624091_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 경남정보보호센터 운영지원 용역 사업금액이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624091_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "철도 제어케이블 교체 유지보수 공사 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624144_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "그 광주본부 케이블 교체 공사 공사금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01624144_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc03",
+    "same_project_group": null
+  },
+  {
+    "query": "철도 건널목 보안장치 개량공사 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624191_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc04",
+    "same_project_group": null
+  },
+  {
+    "query": "그 대구본부 건널목 보안장치 공사 위험작업 등급이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624191_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc04",
+    "same_project_group": null
+  },
+  {
+    "query": "보험 사기방지시스템 관련 전산 감리 용역 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624318_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "정보시스템 감리법인 등록업체면 참여 가능한 전산 감리 건인가",
+    "answer_bid_id": [
+      "R26BK01624318_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "그 우체국보험 IFDS 감리 용역 사업금액이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624318_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": null
+  },
+  {
+    "query": "재활용 정책 관련 연구용역 공고 찾는 중",
+    "answer_bid_id": [
+      "R26BK01624449_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "학술연구용역 등록업체면 참여 가능한 재활용 분류 연구인가",
+    "answer_bid_id": [
+      "R26BK01624449_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 재활용 분류체계 연구 사업 납품기한이랑 예산이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01624449_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "정보통신공사업 등록업체 중 인천 지역업체만 참여 가능한 학교 신축 통신공사 공고인가",
+    "answer_bid_id": [
+      "R26BK01624544_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": "아라3중학교_신축_정보통신공사"
+  },
+  {
+    "query": "재공고된 그 중학교 통신공사 건 공사기간이랑 추정금액이 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01624544_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01,doc02",
+    "same_project_group": "아라3중학교_신축_정보통신공사"
+  },
+  {
+    "query": "환경정보시스템 관련 전산 감리 용역 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624656_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "정보시스템 감리법인 등록에 소프트웨어사업자 업종까지 있어야 참여 가능한 감리 용역인가",
+    "answer_bid_id": [
+      "R26BK01624656_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 EcoAS 시스템 구축 감리 사업금액이랑 납품기한이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624656_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "위치정보 보정하는 항법시스템 구축 용역 있나",
+    "answer_bid_id": [
+      "R26BK01624671_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "직접생산확인증명서 있는 중소 소프트웨어업체만 참여 가능한 시스템 구축 용역인가",
+    "answer_bid_id": [
+      "R26BK01624671_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 해양측위정보원 항법 보정시스템 구축 건 사업금액이랑 입찰마감일이 어떻게 되지?",
+    "answer_bid_id": [
+      "R26BK01624671_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "전기자동차 운전 훈련용 시뮬레이션 장비 사는 공고 있나",
+    "answer_bid_id": [
+      "R26BK01624763_000"
+    ],
+    "type": "탐색형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "제어기시험장치 제조·공급 등록만 하면 참여 가능한 전기차 시뮬레이터 구매 건인가",
+    "answer_bid_id": [
+      "R26BK01624763_000"
+    ],
+    "type": "조건매칭형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  },
+  {
+    "query": "그 전기차 시뮬레이터 구매 건 왜 재공고됐대? 사업금액은 얼마였지?",
+    "answer_bid_id": [
+      "R26BK01624763_000"
+    ],
+    "type": "공고내부형",
+    "source_doc": "doc01",
+    "same_project_group": null
+  }
+]

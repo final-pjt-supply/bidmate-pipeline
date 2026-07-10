@@ -3,9 +3,9 @@
 결과를 experiments/embedding/chunks/all_chunks.json에 저장 + 통계를 출력한다.
 
 청킹 관련 로그는 embedding.chunker의 logging을 그대로 쓴다 — 콘솔엔 INFO 레벨(문서
-단위 요약)까지 출력하고, WARNING 레벨(표 잘림/잔재 드랍/조항 인식 실패)은 메모리에도
-모아서(_WarningCollector) 드랍 목록 등을 전/후 비교 보고에 쓴다. 별도 통계 파일
-없이 로그가 유일한 출처 — chunker.py 쪽 로그 레벨 원칙 주석 참고.
+단위 요약)까지 출력하고, WARNING 레벨(표/박스 분할/잔재 드랍/조항 인식 실패)은
+메모리에도 모아서(_WarningCollector) 드랍 목록 등을 전/후 비교 보고에 쓴다. 별도
+통계 파일 없이 로그가 유일한 출처 — chunker.py 쪽 로그 레벨 원칙 주석 참고.
 
 data/의 각 문서는 pages 리스트(문서 원 페이지 단위)로 나뉘어 있는데,
 chunker.chunk()는 페이지 경계를 모르는 통짜 텍스트 하나를 받는 함수라
@@ -94,19 +94,19 @@ def main() -> None:
     OUT_PATH.write_text(json.dumps(all_chunks, ensure_ascii=False, indent=2), encoding="utf-8")
 
     chunk_lengths = [len(c["text"]) for c in all_chunks]
-    truncated = [c for c in all_chunks if c.get("truncated")]
     dropped_records = [r for r in collector.records if getattr(r, "event", None) == "chunk_dropped"]
     violation_records = [r for r in collector.records if getattr(r, "event", None) == "invariant_violation"]
+    split_records = [r for r in collector.records if getattr(r, "event", None) == "block_split"]
 
     logger.info("총 청크 수: %d", len(all_chunks))
     logger.info("저장 위치: %s", OUT_PATH)
     logger.info("드랍된 청크: %d건 (WARNING 로그 event=chunk_dropped에서 추출)", len(dropped_records))
-    logger.info("불변식 위반(비-truncated 청크가 MAX_CHARS 초과): %d건", len(violation_records))
+    logger.info("불변식 위반(청크가 MAX_CHARS 초과): %d건", len(violation_records))
+    logger.info("표/박스 분할(WARNING 로그 event=block_split에서 추출): %d건", len(split_records))
     logger.info("문서당 청크 수 - 중앙값=%s 최대=%s 최소=%s",
                 statistics.median(per_doc_counts), max(per_doc_counts), min(per_doc_counts))
     logger.info("청크 길이(문자) - 중앙값=%.0f 최대=%s 최소=%s",
                 statistics.median(chunk_lengths), max(chunk_lengths), min(chunk_lengths))
-    logger.info("truncated 청크: %d건", len(truncated))
 
     print()
     print("=== 드랍된 청크 목록 (WARNING 로그 추출, 눈검사용) ===")
@@ -119,19 +119,16 @@ def main() -> None:
         print(f"  [{r.source}] chunk_idx={r.chunk_idx} length={r.length}자")
 
     print()
-    print("=== truncated 청크 목록 ===")
-    for c in truncated:
-        print(
-            f"  {c['bid_id']}_{c['document_id']} chunk_idx={c['chunk_idx']} "
-            f"original={c['original_chars']}자 kept={c['kept_chars']}자"
-        )
+    print("=== 표/박스 분할 목록 ===")
+    for r in split_records:
+        print(f"  [{r.source}] original={r.original_chars}자 → {r.chunk_count}개 청크")
 
     print()
-    print("=== 최장 청크 상위 5개 (1,125자 사례 등 병합 결과 확인용) ===")
+    print("=== 최장 청크 상위 5개 ===")
     for c in sorted(all_chunks, key=lambda c: len(c["text"]), reverse=True)[:5]:
         print(
             f"  {c['bid_id']}_{c['document_id']} chunk_idx={c['chunk_idx']} "
-            f"type={c['type']} length={len(c['text'])}자 truncated={c.get('truncated', False)}"
+            f"type={c['type']} length={len(c['text'])}자"
         )
 
 

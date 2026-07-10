@@ -24,5 +24,37 @@ services:
       # 번호를 접두어로 붙여뒀다(접두어 없으면 알파벳 순 "bid_attachments" < "bid_table"로 뒤집힘).
       - ./schema:/docker-entrypoint-initdb.d:ro
 
+  # 로컬 임베딩 실험(knn/BM25/하이브리드 검색 테스트)용 — .env의 OPENSEARCH_*
+  # (실제 AWS 관리형 bidmate-search 클러스터, 다른 팀 소유)와는 완전히 별개다.
+  # 인증 없이 로컬에서만 접근하는 용도라 보안 플러그인을 껐다
+  # (DISABLE_SECURITY_PLUGIN) — 절대 외부에 노출하면 안 됨, 로컬 전용.
+  #
+  # ⚠ 한국어 형태소 분석(analysis-nori) 플러그인은 이 compose 파일에 포함되지
+  # 않는다 — `docker exec bidding-agent-opensearch bin/opensearch-plugin install
+  # --batch analysis-nori` 후 `docker restart bidding-agent-opensearch`로 설치.
+  # plugins 디렉토리는 named volume이 아니라 컨테이너 파일시스템에 있어서
+  # `docker restart`로는 유지되지만 `docker compose down`(컨테이너 삭제) 후
+  # 다시 `up`하면 사라진다 — 그때마다 위 두 명령을 재실행해야 함.
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: bidding-agent-opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - osdata:/usr/share/opensearch/data
+
 volumes:
   pgdata:
+  osdata:
