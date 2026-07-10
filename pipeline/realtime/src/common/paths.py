@@ -26,6 +26,7 @@ import re
 # 최상위 토큰만 상수로 빼둔다 — 나중에 또 이름이 바뀌어도 여기 한 줄만 고치면 됨.
 EXTRACTED_PREFIX = "extracted"
 QUALIFICATIONS_PREFIX = "qualifications"
+VECTORS_PREFIX = "vectors"  # 임베딩 산출물(청크+벡터). qualifications와 형제 관계(#64)
 
 _RAW_KEY_RE = re.compile(
     r"^raw/downloads/(?P<stage>[^/]+)"
@@ -80,6 +81,32 @@ def extracted_key_to_qualifications_key(key: str) -> str:
         "/year={year}/month={month}/day={day}/hour={hour}"
         "/{bid_id}/{file_id}.json"
     ).format(prefix=QUALIFICATIONS_PREFIX, **parts)
+
+
+_VECTORS_KEY_RE = re.compile(
+    rf"^{re.escape(VECTORS_PREFIX)}/(?P<stage>[^/]+)"
+    r"/biz_div=(?P<biz_div>[^/]+)"
+    r"/year=(?P<year>[^/]+)/month=(?P<month>[^/]+)/day=(?P<day>[^/]+)/hour=(?P<hour>[^/]+)"
+    r"/(?P<bid_id>[^/]+)/(?P<file_id>[^/]+)\.json$"
+)
+
+
+def parse_vectors_key(key: str) -> dict:
+    """vectors(임베딩 청크+벡터) key에서 stage/biz_div/year/month/day/hour/bid_id/file_id를 꺼낸다. 형식이 다르면 ValueError."""
+    m = _VECTORS_KEY_RE.match(key)
+    if m is None:
+        raise ValueError(f"{VECTORS_PREFIX} key 형식이 아님: {key}")
+    return m.groupdict()
+
+
+def extracted_key_to_vectors_key(key: str) -> str:
+    """extracted key와 같은 파티션 구조로 첫 토큰만 vectors(임베딩 청크+벡터)로 바꿔 결과 key를 조립한다."""
+    parts = parse_extracted_key(key)
+    return (
+        "{prefix}/{stage}/biz_div={biz_div}"
+        "/year={year}/month={month}/day={day}/hour={hour}"
+        "/{bid_id}/{file_id}.json"
+    ).format(prefix=VECTORS_PREFIX, **parts)
 
 
 def document_id_from_file_id(bid_id: str, file_id: str) -> str:

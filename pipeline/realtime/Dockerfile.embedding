@@ -1,0 +1,42 @@
+# 임베딩 + 인덱싱 Lambda 2개가 공유하는 이미지(#64) — pdf/hwp/hwpx가
+# Dockerfile.extractor를 공유하는 것과 동일 패턴으로, CMD 없이 함수 생성 시
+# ImageConfig.Command만 다르게 오버라이드한다(handlers.embed_chunks.lambda_handler
+# / handlers.index_opensearch.lambda_handler).
+# 빌드는 리포 루트에서:
+#   docker build --provenance=false --sbom=false -f pipeline/realtime/Dockerfile.embedding -t bidding-agent-embedding .
+# ⚠ --provenance=false --sbom=false 필수: 이거 없이 빌드하면 Docker BuildKit이 기본으로
+# OCI image index(멀티플랫폼 매니페스트 리스트 + attestation 서브매니페스트)를 만드는데,
+# Lambda는 이 포맷을 지원 안 하고 단일 Docker V2 Schema2 매니페스트만 받는다.
+FROM public.ecr.aws/lambda/python:3.13
+# Python 3.13: Dockerfile.llm과 동일 근거 — 이 이미지엔 구버전 호환이 필요한
+# pymupdf/lxml/pyhwp 같은 패키지가 없어 최신 버전을 막을 이유가 없다.
+
+COPY pipeline/realtime/requirements-embedding.txt /tmp/requirements-embedding.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-embedding.txt
+
+# common/: config, paths, s3, sqs, logs — embed_chunks.py/index_opensearch.py가
+# 공유해서 쓴다. result.py는 둘 다 안 써서(build_result는 추출 handler 전용) 제외.
+COPY pipeline/realtime/src/common/__init__.py ${LAMBDA_TASK_ROOT}/common/__init__.py
+COPY pipeline/realtime/src/common/config.py ${LAMBDA_TASK_ROOT}/common/config.py
+COPY pipeline/realtime/src/common/paths.py ${LAMBDA_TASK_ROOT}/common/paths.py
+COPY pipeline/realtime/src/common/s3.py ${LAMBDA_TASK_ROOT}/common/s3.py
+COPY pipeline/realtime/src/common/sqs.py ${LAMBDA_TASK_ROOT}/common/sqs.py
+COPY pipeline/realtime/src/common/logs.py ${LAMBDA_TASK_ROOT}/common/logs.py
+
+# embedding/: embedding/chunker.py, cloudflare_embedder.py(experiments/embedding
+# 로컬 검증본) 이식본 — 리포 루트 embedding/ 패키지가 아니라 이 realtime 전용
+# 사본을 쓴다(로직은 동일, 배선만 realtime 패턴). docs/indexing-design-notes.md
+# 참고. index_opensearch.py는 안 쓰지만 embed_chunks.py 전용으로 분리하기엔
+# 이미지 하나 공유 구조라 실익이 없어 그냥 같이 넣는다(추출 3종이 서로 안 쓰는
+# 다른 extractors/*.py도 이미지 하나에 다 들어가는 것과 동일 패턴).
+COPY pipeline/realtime/src/embedding/ ${LAMBDA_TASK_ROOT}/embedding/
+
+# indexing/: OpenSearch 매핑 상수 + 클라이언트 생성(local/aws 분기) — index_opensearch.py 전용.
+COPY pipeline/realtime/src/indexing/ ${LAMBDA_TASK_ROOT}/indexing/
+
+# handlers/: embed_chunks.py + index_opensearch.py 둘 다.
+COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
+COPY pipeline/realtime/src/handlers/embed_chunks.py ${LAMBDA_TASK_ROOT}/handlers/embed_chunks.py
+COPY pipeline/realtime/src/handlers/index_opensearch.py ${LAMBDA_TASK_ROOT}/handlers/index_opensearch.py
+
+# CMD 없음 — 임베딩/인덱싱 Lambda 함수 생성 시 ImageConfig.Command로 각자 지정.
