@@ -43,7 +43,6 @@ INDEX_MAPPING: dict = {
         "properties": {
             "file_id": {"type": "keyword"},
             "bid_id": {"type": "keyword"},
-            "document_id": {"type": "keyword"},
             "chunk_idx": {"type": "integer"},
             "type": {"type": "keyword"},
             "text": {"type": "text", "analyzer": "korean"},

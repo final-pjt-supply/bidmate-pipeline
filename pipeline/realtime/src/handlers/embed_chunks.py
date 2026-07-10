@@ -72,13 +72,14 @@ def _process(bucket: str, key: str) -> None:
         )
 
         # OpenSearch 문서 필드셋(docs/indexing-design-notes.md 6-2)에 맞춰 조립.
-        # 청크 하나하나가 file_id/bid_id/document_id를 전부 들고 있어 인덱싱
-        # Lambda가 envelope 없이 이 리스트만 순회해도 되게 한다.
+        # 청크 하나하나가 file_id/bid_id를 전부 들고 있어 인덱싱 Lambda가
+        # envelope 없이 이 리스트만 순회해도 되게 한다. document_id는 file_id로
+        # 이미 커버되는 잉여 필드라 저장 스키마에서 뺐다(2026-07-10, #64 배포 전
+        # 정리 — document_id는 이 handler 안에서 로그 추적용으로만 계속 쓴다).
         result_chunks = [
             {
                 "file_id": file_id,
                 "bid_id": bid_id,
-                "document_id": document_id,
                 "chunk_idx": c["chunk_idx"],
                 "type": c["type"],
                 "text": c["text"],
@@ -90,7 +91,6 @@ def _process(bucket: str, key: str) -> None:
         ]
         result = {
             "bid_id": bid_id,
-            "document_id": document_id,
             "file_id": file_id,
             "chunks": result_chunks,
         }
