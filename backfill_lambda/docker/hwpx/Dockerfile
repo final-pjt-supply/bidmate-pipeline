@@ -1,6 +1,6 @@
 FROM public.ecr.aws/lambda/python:3.11
 
-COPY docker/hwpx/requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
+COPY backfill_lambda/docker/hwpx/requirements.txt ${LAMBDA_TASK_ROOT}/requirements.txt
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
 COPY parsing/ ${LAMBDA_TASK_ROOT}/parsing/

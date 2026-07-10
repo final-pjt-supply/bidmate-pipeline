@@ -58,6 +58,12 @@ docs/
 # Sample data
 data/sample/*.pdf
 data/sample/output/
+batch-reports/
+
+# ── SAM / 빌드 산출물 · 생성 매니페스트 (로컬 전용) ──
+.aws-sam/
+samconfig.toml
+manifest-*.csv
 
 # ── AWS SAM 빌드 산출물 (sam build 결과, 재생성 가능) ──
 .aws-sam/

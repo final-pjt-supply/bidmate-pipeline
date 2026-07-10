@@ -1,0 +1,2 @@
+openai>=2,<3   # extractors/llm/client.py가 NVIDIA Build API(OpenAI 호환) 호출에 사용
+boto3    # backfill/s3.py + handler S3 접근
