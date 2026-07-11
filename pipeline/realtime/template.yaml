@@ -114,12 +114,12 @@ Parameters:
   # ============================================================
   MergeImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:REPLACE_AFTER_FIRST_PUSH
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:d6d299596aaaf74f591d0f4da9f9e0c36adc97129f475df16f82d0c777a6a5df
     Description: >
-      RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). :latest 금지 —
-      CloudFormation이 태그 변경을 감지 못해 이미지가 바뀌어도 재배포가 안 될
-      수 있다. 최초 빌드/푸시 후 `docker inspect --format='{{index .RepoDigests 0}}'`
-      등으로 확인한 실제 digest로 이 Default를 갱신할 것.
+      RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). 2026-07-12 최초
+      빌드/푸시 후 실제 digest로 갱신됨(196MB). :latest 금지 — CloudFormation이
+      태그 변경을 감지 못해 이미지가 바뀌어도 재배포가 안 될 수 있다. 이후
+      이미지를 다시 빌드/푸시할 때마다 이 Default를 새 digest로 갱신할 것.
 
   MergeDbHost:
     Type: String
