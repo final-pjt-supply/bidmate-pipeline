@@ -49,6 +49,15 @@ OBJECT_LIST_FIELD_KEYS: dict[str, tuple[str, ...] | None] = {
 # region_limit_names는 문자열 리스트라 별도 함수(_merge_string_list_field)로 처리.
 # 11(스칼라) + 5(OBJECT_LIST_FIELD_KEYS) + 1(required_licenses) + 1(region_limit_names) = 18.
 
+# bid_table 자격요건 18개 컬럼 전체 — merge/db.py가 UPDATE 문의 SET 대상 컬럼
+# 목록을 여기서 그대로 가져다 쓴다(컬럼 목록을 두 곳에 따로 하드코딩하면 필드
+# 추가/삭제 시 어긋날 위험이 있어 단일 소스로 둔다).
+ALL_QUALIFICATION_FIELDS = (
+    SCALAR_FIELDS
+    + ("region_limit_names", "required_licenses")
+    + tuple(OBJECT_LIST_FIELD_KEYS.keys())
+)
+
 
 def merge_qualification_documents(bid_id: str, documents: list[dict]) -> dict:
     """documents(같은 bid_id의 qualifications JSON들)를 병합해 bid_table UPDATE에
