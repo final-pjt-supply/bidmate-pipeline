@@ -596,6 +596,25 @@ Resources:
                 Condition:
                   StringLike:
                     s3:prefix: "qualifications/*"
+        - PolicyName: realtime-merge-sns-publish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PublishFailureToAlerts
+                # Lambda 비동기 호출 Destinations(RealtimeMergeFunction의
+                # EventInvokeConfig.DestinationConfig.OnFailure)는 EventBridge나
+                # Lambda 서비스 role이 대상에 쓰는 게 아니라, 호출된 함수 "자신의"
+                # 실행 role 권한으로 쓴다 — 2차 배포 시도에서 이 권한이 없어
+                # EventInvokeConfig 생성 자체가 거부되는 것으로 확인됨. 다른
+                # SQS 트리거 Lambda role들엔 이 권한이 없어도 되는 이유:
+                # (1) 그 Lambda들의 실패 처리는 EventInvokeConfig가 아니라
+                # SQS RedrivePolicy(큐 레벨)로 SQS 서비스가 직접 처리하고,
+                # (2) DLQ 알람의 SNS 발행은 CloudWatch 서비스가 알람 액션으로
+                # 호출한다(토픽 정책이 cloudwatch.amazonaws.com을 허용) — 둘 다
+                # Lambda 실행 role과 무관한 경로라 이 권한이 필요 없었다.
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref RealtimeAlertsTopic
 
   # ============================================================
   # Lambda — pdf/hwp/hwpx 3개는 이미지 1개 공유(ExtractorImageUri) + CMD만 다르게.
