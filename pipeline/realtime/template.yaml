@@ -151,10 +151,11 @@ Parameters:
 
   MergeScheduleRate:
     Type: String
-    Default: "rate(10 minutes)"
+    Default: "rate(5 minutes)"
     Description: >
-      RDS 병합 배치 실행 주기. LLM 추출 실측 처리시간(76~180초/문서, expected_file_count
-      1~2건 기준) 대비 근실시간 반영과 과호출 방지의 균형점으로 10분을 기본값으로 둔다.
+      RDS 병합 배치 실행 주기. 앞단 Airflow 수집 주기가 5분이라(2026-07-12
+      확인) 병합이 그보다 느리면 신선도 병목이 되므로 맞춤. LLM 추출 실측
+      처리시간(76~180초/문서, expected_file_count 1~2건 기준)에도 여유 있음.
 
 Resources:
   # ============================================================
@@ -831,7 +832,7 @@ Resources:
           MERGE_DB_USER: !Ref MergeDbUser
           MERGE_DB_PASSWORD: !Ref MergeDbPassword
           SOURCE_BUCKET: !Ref SourceBucketName
-          DRY_RUN: "true"
+          DRY_RUN: "false"   # 2026-07-12 DRY_RUN 검증 완료(10건 merged, 충돌/에러 0) — 실전 전환
       EventInvokeConfig:
         MaximumRetryAttempts: 0
         DestinationConfig:
@@ -1045,7 +1046,7 @@ Resources:
         - Name: FunctionName
           Value: !Ref RealtimeMergeFunction
       Statistic: Sum
-      Period: 600   # MergeScheduleRate(기본 10분)와 맞춤
+      Period: 300   # MergeScheduleRate(기본 5분, 2026-07-12 Airflow 주기 맞춤)와 일치
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
