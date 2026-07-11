@@ -56,7 +56,7 @@ BID_TABLE_COLUMNS = (
     "rgst_dt",
     "chg_dt",
     "presmpt_prce",
-    "asign_bdgt_amt",
+    "bdgt_amt",
     "vat",
     "govsply_amt",
     "cntrct_cncls_mthd_nm",
@@ -91,10 +91,18 @@ JSONB_COLUMNS = {
     "subsi_cnstty",
 }
 FIELD_ALIASES = {
-    "asign_bdgt_amt": ("asign_bdgt_amt", "bdgt_amt"),
+    "bdgt_amt": ("bdgt_amt", "asign_bdgt_amt", "asignBdgtAmt"),
     "cnstty_share_rates": ("cnstty_share_rates", "cnstty_accot_shre_rate_list"),
-    "jntcontrct_duty_rgns": ("jntcontrct_duty_rgns", "jntcontrct_duty_rgn_nm"),
 }
+
+JNTCONTRCT_DUTY_RGN_KEYS = (
+    "jntcontrctDutyRgnNm1",
+    "jntcontrctDutyRgnNm2",
+    "jntcontrctDutyRgnNm3",
+    "jntcontrct_duty_rgn_nm1",
+    "jntcontrct_duty_rgn_nm2",
+    "jntcontrct_duty_rgn_nm3",
+)
 
 ATTACHMENT_COLUMNS = (
     "file_id",
@@ -150,6 +158,25 @@ def first_value(item: dict[str, Any], column: str) -> Any:
     return None
 
 
+def compact_values(values: list[Any]) -> list[Any]:
+    return [value for value in values if has_value(value)]
+
+
+def build_jntcontrct_duty_rgns(item: dict[str, Any]) -> list[Any] | None:
+    # 원본 API의 jntcontrctDutyRgnNm1~3 또는 curated의 배열 필드를 DB JSONB 1컬럼으로 묶는다.
+    for key in ("jntcontrct_duty_rgns", "jntcontrct_duty_rgn_nm"):
+        value = item.get(key)
+        if isinstance(value, list):
+            regions = compact_values(value)
+            if regions:
+                return regions
+        if has_value(value):
+            return [value]
+
+    regions = compact_values([item.get(key) for key in JNTCONTRCT_DUTY_RGN_KEYS])
+    return regions or None
+
+
 def adapt_value(column: str, value: Any) -> Any:
     if column in JSONB_COLUMNS and value is not None:
         return Jsonb(value)
@@ -159,7 +186,10 @@ def adapt_value(column: str, value: Any) -> Any:
 def build_bid_row(item: dict[str, Any], curated_s3_key: str) -> dict[str, Any]:
     row: dict[str, Any] = {}
     for column in BID_TABLE_COLUMNS:
-        value = first_value(item, column)
+        if column == "jntcontrct_duty_rgns":
+            value = build_jntcontrct_duty_rgns(item)
+        else:
+            value = first_value(item, column)
         if column == "raw_s3_key" and not has_value(value):
             value = curated_s3_key
         if has_value(value):

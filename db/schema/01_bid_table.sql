@@ -24,7 +24,7 @@ CREATE TABLE bid_table (
     chg_dt             TIMESTAMP,              -- API: chgDt
     -- 금액
     presmpt_prce       BIGINT,                 -- API: presmptPrce
-    asign_bdgt_amt     BIGINT,                 -- API: asignBdgtAmt
+    bdgt_amt           BIGINT,                 -- API: asignBdgtAmt
     vat                BIGINT,                 -- API: VAT (추정)
     govsply_amt        BIGINT,                 -- API: govsplyAmt (추정)
     -- 방식
