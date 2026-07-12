@@ -8,3 +8,4 @@ requests
 Pillow
 pytest
 psycopg[binary]
+tqdm

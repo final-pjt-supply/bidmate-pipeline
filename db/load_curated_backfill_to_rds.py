@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from psycopg.types.json import Jsonb
+from tqdm import tqdm
 
 try:
     from apply_schema_to_rds import build_database_url, describe_target
@@ -37,6 +39,8 @@ except ImportError:  # pragma: no cover - unittest가 repo root에서 import할 
 DEFAULT_REGION = "ap-northeast-2"
 DEFAULT_BID_LIMIT = 0
 DEFAULT_ATTACHMENT_LIMIT = 0
+DEFAULT_FETCH_WORKERS = 10
+DEFAULT_WRITE_BATCH_SIZE = 500
 
 BID_TABLE_COLUMNS = (
     "bid_ntce_no",
@@ -136,6 +140,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_ATTACHMENT_LIMIT,
         help="Maximum number of attachment rows to load. Defaults to 0, which means no limit.",
+    )
+    parser.add_argument(
+        "--fetch-workers",
+        type=int,
+        default=DEFAULT_FETCH_WORKERS,
+        help=f"Concurrent S3 read threads. Defaults to {DEFAULT_FETCH_WORKERS}.",
+    )
+    parser.add_argument(
+        "--write-batch-size",
+        type=int,
+        default=DEFAULT_WRITE_BATCH_SIZE,
+        help=f"Rows per executemany() batch when writing to RDS. Defaults to {DEFAULT_WRITE_BATCH_SIZE}.",
     )
     parser.add_argument(
         "--dry-run",
@@ -293,20 +309,33 @@ def build_rows(
     prefix: str,
     bid_limit: int | None,
     attachment_limit: int | None,
+    fetch_workers: int = DEFAULT_FETCH_WORKERS,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     keys = list_json_keys(s3_client, bucket, prefix, bid_limit)
     bid_rows: list[dict[str, Any]] = []
     attachment_rows: list[dict[str, Any]] = []
 
-    for key in keys:
-        item = read_json_object(s3_client, bucket, key)
-        if not isinstance(item, dict):
-            raise ValueError(f"Top-level JSON is not an object: {key}")
+    def fetch(key: str) -> Any:
+        return read_json_object(s3_client, bucket, key)
 
-        bid_rows.append(build_bid_row(item, key))
-        attachment_rows.extend(
-            build_attachment_rows(item, key, attachment_limit, len(attachment_rows)),
+    # boto3 client는 스레드 세이프하므로 S3 GET(네트워크 대기가 대부분)만 병렬화한다.
+    # executor.map()은 완료 순서와 무관하게 입력 순서대로 결과를 돌려주므로, attachment_limit
+    # 잘림 로직이 기대하는 "키 나열 순서" 그대로 뒤이은 row 조립에 넘길 수 있다.
+    with ThreadPoolExecutor(max_workers=fetch_workers) as executor:
+        items = tqdm(
+            executor.map(fetch, keys),
+            total=len(keys),
+            desc="S3 curated JSON 읽는 중",
+            unit="건",
         )
+        for key, item in zip(keys, items):
+            if not isinstance(item, dict):
+                raise ValueError(f"Top-level JSON is not an object: {key}")
+
+            bid_rows.append(build_bid_row(item, key))
+            attachment_rows.extend(
+                build_attachment_rows(item, key, attachment_limit, len(attachment_rows)),
+            )
 
     return bid_rows, attachment_rows
 
@@ -348,7 +377,19 @@ def confirm_write(bid_count: int, attachment_count: int, target: str) -> None:
         raise SystemExit("Canceled.")
 
 
-def write_rows(database_url: str, bid_rows: list[dict[str, Any]], attachment_rows: list[dict[str, Any]]) -> None:
+def write_batches(cur, sql: str, rows: list[dict[str, Any]], batch_size: int, desc: str) -> None:
+    if not rows:
+        return
+    for start in tqdm(range(0, len(rows), batch_size), desc=desc, unit="batch"):
+        cur.executemany(sql, rows[start : start + batch_size])
+
+
+def write_rows(
+    database_url: str,
+    bid_rows: list[dict[str, Any]],
+    attachment_rows: list[dict[str, Any]],
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+) -> None:
     import psycopg
 
     bid_sql = build_upsert_sql("bid_table", BID_TABLE_COLUMNS, ("bid_ntce_no", "bid_ntce_ord"))
@@ -356,15 +397,23 @@ def write_rows(database_url: str, bid_rows: list[dict[str, Any]], attachment_row
         "bid_attachments", ATTACHMENT_COLUMNS, ("file_id",), ATTACHMENT_NO_REGRESS_COLUMNS,
     )
 
+    # 배치로 나눠서 진행률만 보여줄 뿐, 커밋은 맨 마지막 한 번뿐이라 원자성은 그대로 유지된다
+    # (중간에 실패하면 이번 실행에서 실행된 배치까지 전부 롤백된다).
     with psycopg.connect(database_url, connect_timeout=10) as conn:
         with conn.cursor() as cur:
-            cur.executemany(
+            write_batches(
+                cur,
                 bid_sql,
                 [normalize_row(row, BID_TABLE_COLUMNS) for row in bid_rows],
+                batch_size,
+                "bid_table 적재 중",
             )
-            cur.executemany(
+            write_batches(
+                cur,
                 attachment_sql,
                 [normalize_row(row, ATTACHMENT_COLUMNS) for row in attachment_rows],
+                batch_size,
+                "bid_attachments 적재 중",
             )
         conn.commit()
 
@@ -392,6 +441,7 @@ def main() -> None:
             args.prefix,
             bid_limit,
             attachment_limit,
+            args.fetch_workers,
         )
     except NoCredentialsError:
         print(
@@ -418,7 +468,7 @@ def main() -> None:
     if not args.yes:
         confirm_write(len(bid_rows), len(attachment_rows), target)
 
-    write_rows(database_url, bid_rows, attachment_rows)
+    write_rows(database_url, bid_rows, attachment_rows, args.write_batch_size)
     print(f"loaded_bid_rows={len(bid_rows)}")
     print(f"loaded_attachment_rows={len(attachment_rows)}")
 
