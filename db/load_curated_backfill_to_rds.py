@@ -187,9 +187,12 @@ def build_jntcontrct_duty_rgns(item: dict[str, Any]) -> list[Any] | None:
     for key in ("jntcontrct_duty_rgns", "jntcontrct_duty_rgn_nm"):
         value = item.get(key)
         if isinstance(value, list):
+            # has_value([])는 str([])=="[]"라 "값 있음"으로 오판해 [[]] 이중 래핑을 만들던 버그가
+            # 있었다. 이미 리스트로 확인했으니 비어있으면 그냥 다음 키로 넘어간다.
             regions = compact_values(value)
             if regions:
                 return regions
+            continue
         if has_value(value):
             return [value]
 
