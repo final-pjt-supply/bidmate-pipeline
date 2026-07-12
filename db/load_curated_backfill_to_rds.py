@@ -111,7 +111,11 @@ ATTACHMENT_COLUMNS = (
     "file_seq",
     "file_url",
     "s3_key",
+    "status",
 )
+# status는 이 로더가 최초 등록한 시점의 스냅샷이라, 재실행 시 뒷단(자격요건 병합) 파이프라인이
+# 이미 진전시켜 놓은 상태(extracted/qualifications)를 덮어써서 되돌리면 안 된다.
+ATTACHMENT_NO_REGRESS_COLUMNS = ("status",)
 
 
 def parse_args() -> argparse.Namespace:
@@ -205,8 +209,35 @@ def build_bid_row(item: dict[str, Any], curated_s3_key: str) -> dict[str, Any]:
     return row
 
 
+def derive_attachment_s3_key(item: dict[str, Any], curated_s3_key: str, file_id: str, file_nm: Any) -> str:
+    # curated JSON의 attachment 항목에는 s3_key가 없는 경우가 많다(원시 수집 단계가 아직
+    # 첨부파일별 key를 안 넘겨줌). 스키마 주석("{biz_div}/... 파티션 구조")을 따라, 같은 공고의
+    # raw_s3_key(또는 curated key)가 속한 파티션 디렉터리 아래 attachments/ 폴더에 있다고 가정한
+    # best-effort 값이다 — 실제 오브젝트 존재를 보장하지 않으므로 원시 수집기가 실 키를 채워주면
+    # 그 값(attachment.get("s3_key"))이 항상 우선한다.
+    base_key = item.get("raw_s3_key") or curated_s3_key
+    base_dir = base_key.rsplit("/", 1)[0] if "/" in base_key else base_key
+    ext = ""
+    if isinstance(file_nm, str) and "." in file_nm:
+        ext = "." + file_nm.rsplit(".", 1)[-1]
+    return f"{base_dir}/attachments/{file_id}{ext}"
+
+
+def determine_attachment_status(file_url: Any, s3_key: Any) -> str:
+    # 스키마 주석의 상태 값(collected/extracted/qualifications/failed) 중, 이 로더가 아는 범위
+    # 안에서만 판단한다. 실제 추출/자격요건 병합은 별도 파이프라인이 수행하므로 그 이상은 함부로
+    # 'extracted'/'qualifications'로 단정하지 않는다(뒷단 파이프라인이 진전시킨 상태는
+    # ATTACHMENT_NO_REGRESS_COLUMNS로 보호되어 이 로더 재실행으로 되돌아가지 않는다).
+    if not has_value(file_url):
+        return "failed"
+    if not has_value(s3_key):
+        return "pending"
+    return "collected"
+
+
 def build_attachment_rows(
     item: dict[str, Any],
+    curated_s3_key: str,
     attachment_limit: int | None,
     used_count: int,
 ) -> list[dict[str, Any]]:
@@ -218,8 +249,10 @@ def build_attachment_rows(
         return []
 
     rows: list[dict[str, Any]] = []
+    truncated_count = 0
     for seq, attachment in enumerate(attachments, start=1):
         if attachment_limit is not None and used_count + len(rows) >= attachment_limit:
+            truncated_count = len(attachments) - seq + 1
             break
         if not isinstance(attachment, dict):
             continue
@@ -229,15 +262,27 @@ def build_attachment_rows(
             continue
 
         # file_id는 스키마 주석 규칙({bid_id}_doc{seq:02d})에 맞춘다.
+        file_id = f"{bid_id}_doc{seq:02d}"
+        s3_key = attachment.get("s3_key") or derive_attachment_s3_key(
+            item, curated_s3_key, file_id, attachment.get("file_nm"),
+        )
         rows.append(
             {
-                "file_id": f"{bid_id}_doc{seq:02d}",
+                "file_id": file_id,
                 "bid_ntce_no": bid_ntce_no,
                 "bid_ntce_ord": bid_ntce_ord,
                 "file_seq": seq,
                 "file_url": file_url,
-                "s3_key": attachment.get("s3_key"),
+                "s3_key": s3_key,
+                "status": determine_attachment_status(file_url, s3_key),
             },
+        )
+
+    if truncated_count:
+        print(
+            f"warning: attachment_limit truncated {bid_id} "
+            f"({truncated_count} attachment(s) dropped)",
+            file=sys.stderr,
         )
     return rows
 
@@ -259,16 +304,29 @@ def build_rows(
             raise ValueError(f"Top-level JSON is not an object: {key}")
 
         bid_rows.append(build_bid_row(item, key))
-        attachment_rows.extend(build_attachment_rows(item, attachment_limit, len(attachment_rows)))
+        attachment_rows.extend(
+            build_attachment_rows(item, key, attachment_limit, len(attachment_rows)),
+        )
 
     return bid_rows, attachment_rows
 
 
-def build_upsert_sql(table: str, columns: tuple[str, ...], conflict_columns: tuple[str, ...]) -> str:
+def build_upsert_sql(
+    table: str,
+    columns: tuple[str, ...],
+    conflict_columns: tuple[str, ...],
+    no_regress_columns: tuple[str, ...] = (),
+) -> str:
     column_sql = ", ".join(columns)
     value_sql = ", ".join(f"%({column})s" for column in columns)
     conflict_sql = ", ".join(conflict_columns)
-    update_columns = [column for column in columns if column not in conflict_columns]
+    # no_regress_columns는 최초 INSERT 시에만 값을 넣고, 이후 재실행(UPDATE)에서는 건드리지
+    # 않는다 — 이 로더보다 뒷단 파이프라인이 이미 진전시켜 놓은 상태를 되돌리지 않기 위함.
+    update_columns = [
+        column
+        for column in columns
+        if column not in conflict_columns and column not in no_regress_columns
+    ]
     update_sql = ", ".join(f"{column} = EXCLUDED.{column}" for column in update_columns)
     update_sql = f"{update_sql}, updated_at = NOW()" if update_sql else "updated_at = NOW()"
     return (
@@ -294,7 +352,9 @@ def write_rows(database_url: str, bid_rows: list[dict[str, Any]], attachment_row
     import psycopg
 
     bid_sql = build_upsert_sql("bid_table", BID_TABLE_COLUMNS, ("bid_ntce_no", "bid_ntce_ord"))
-    attachment_sql = build_upsert_sql("bid_attachments", ATTACHMENT_COLUMNS, ("file_id",))
+    attachment_sql = build_upsert_sql(
+        "bid_attachments", ATTACHMENT_COLUMNS, ("file_id",), ATTACHMENT_NO_REGRESS_COLUMNS,
+    )
 
     with psycopg.connect(database_url, connect_timeout=10) as conn:
         with conn.cursor() as cur:
