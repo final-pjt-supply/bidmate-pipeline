@@ -1,5 +1,28 @@
 # 백로그
 
+## PGSQL bid_table/bid_attachments 적재 로직 미구현 (2026-07-10, #64 범위 밖 확인)
+
+**현재 상태**: 수집/추출/LLM 결과를 PGSQL `bid_table`/`bid_attachments`에 넣는
+서비스가 이 repo 어디에도 없음(전수 검색 결과 `psycopg2`, `INSERT INTO`,
+`bid_table`/`bid_attachments` 참조가 `.py`/`template.yaml` 전체에 0건). 의도된
+상태(아직 안 만듦) — 버그 아님.
+
+**#64(실시간 임베딩+인덱싱 파이프라인)와의 관계**: #64는 이 적재 로직 없이도
+완결됨. OpenSearch 문서에 `file_id`(PGSQL `bid_attachments` PK와 동일 형식)를
+저장해두는 것까지가 #64 범위 — "join 열쇠를 넣어두는 것"만 하고, "join
+대상(PGSQL 실제 적재)"은 이 항목으로 별도 분리.
+
+**필요 작업**: 수집/추출/LLM 파이프라인 산출물(raw 메타데이터 + qualifications/
+....json)을 읽어 `bid_table`/`bid_attachments`에 upsert하는 서비스. 레거시
+`feat/retriever-mvp-#24` 브랜치의 `db/postgres_loader.py` 설계 아이디어가
+`docs/indexing-design-notes.md`(로컬 전용, git 미추적)에 정리돼 있음 — 재구현
+시 참고.
+
+**우선순위**: #64와 별도 이슈로 다룰 것. OpenSearch만으로는 검색은 되지만
+공고명/마감일/자격요건 등 실제 판단에 필요한 정보를 못 가져오므로(설계상
+OpenSearch엔 메타데이터를 안 넣고 PGSQL을 마스터로 런타임 join하는 구조),
+에이전트가 실사용되기 전에는 반드시 필요.
+
 ## 확장자-실제 포맷 불일치로 인한 오탐 라우팅 위험 (2026-07-10 발견)
 
 **증상**: 파일 확장자와 실제 포맷이 불일치하는 케이스 존재 — `.hwpx` 확장자인데

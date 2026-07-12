@@ -5,6 +5,7 @@ import logging
 import time
 
 from common import paths, s3, sqs
+from common.config import load_config
 from common.logs import log_process_done, log_process_skip, log_process_start
 from common.result import build_result
 from extractors import pdf
@@ -46,6 +47,7 @@ def _process(bucket: str, key: str) -> None:
 
         s3.put_object(bucket, extracted_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
         sqs.send_to_next_queue({"bucket": bucket, "key": extracted_key})
+        _send_to_embed_queue(bucket, extracted_key, bid_id, document_id)
         log_process_done(bid_id, document_id, int((time.monotonic() - start) * 1000), extracted_key)
     except Exception:
         logger.exception(
@@ -53,3 +55,19 @@ def _process(bucket: str, key: str) -> None:
             bucket, key, bid_id, document_id,
         )
         raise
+
+
+def _send_to_embed_queue(bucket: str, extracted_key: str, bid_id: str, document_id: str) -> None:
+    """임베딩 큐(#64)로 병렬 분기. 실패해도 기존 LLM 파이프라인은 막지 않는다 —
+    여기서 예외를 삼키고 로깅만 한다(바깥 try/except로 전파해 재시도/DLQ 되는 걸 방지).
+    embed_queue_url이 없으면(SAM template 배포 전 상태) 조용히 건너뛴다."""
+    embed_queue_url = load_config()["embed_queue_url"]
+    if not embed_queue_url:
+        return
+    try:
+        sqs.send_to_queue(embed_queue_url, {"bucket": bucket, "key": extracted_key})
+    except Exception:
+        logger.exception(
+            "임베딩 큐 전송 실패(LLM 파이프라인은 정상 진행): bid_id=%s document_id=%s key=%s",
+            bid_id, document_id, extracted_key,
+        )

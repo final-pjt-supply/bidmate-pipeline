@@ -4,9 +4,18 @@ import os
 
 
 def load_config() -> dict:
-    """pdf/hwp/hwpx 추출 handler가 쓰는 설정: 다음(LLM 추출) 큐 URL."""
+    """pdf/hwp/hwpx 추출 handler가 쓰는 설정: 다음(LLM 추출) 큐 URL + 임베딩 큐 URL.
+
+    embed_queue_url: 추출 완료 직후 LLM 큐와 병렬로 분기하는 임베딩 큐(#64).
+    next_queue_url과 달리 os.environ.get(기본값 None)으로 읽는다 — 이 코드가
+    배포된 뒤에도 SAM template(#64 Step 4)에서 EMBED_QUEUE_URL을 실제로 세팅하기
+    전까지는 값이 없는 게 정상이고, 그 상태에서 load_config() 자체가 터지면
+    기존 LLM 큐 전송(next_queue_url)까지 막혀버린다. handler 쪽에서 None이면
+    "아직 안 붙었다"로 보고 임베딩 큐 전송만 건너뛴다.
+    """
     return {
         "next_queue_url": os.environ["LLM_EXTRACT_QUEUE_URL"],
+        "embed_queue_url": os.environ.get("EMBED_QUEUE_URL"),
     }
 
 
@@ -20,4 +29,39 @@ def load_llm_config() -> dict:
         "nvidia_api_key": os.environ["NVIDIA_API_KEY"],
         "llm_base_url": os.environ["LLM_BASE_URL"],
         "llm_model": os.environ["LLM_MODEL"],
+    }
+
+
+def load_embedding_config() -> dict:
+    """임베딩 handler(embed_chunks.py)가 쓰는 설정: Cloudflare Workers AI 접속 정보 +
+    다음(인덱싱) 큐 URL.
+
+    index_queue_url은 os.environ.get(기본값 None) — #64를 임베딩→S3 벡터 저장
+    구간까지만 먼저 배포/검증하고(인덱싱 Lambda·VPC 설정은 후속으로 미룸,
+    2026-07-10 결정) 인덱싱 큐가 아직 없는 상태로 이 Lambda를 띄우기 때문이다.
+    값이 없으면 handler가 "아직 안 붙었다"로 보고 큐 전송만 건너뛰고 S3 저장까지는
+    그대로 완료한다 — extract_pdf/hwp/hwpx.py의 embed_queue_url과 동일한 패턴.
+    """
+    return {
+        "cloudflare_account_id": os.environ["CLOUDFLARE_ACCOUNT_ID"],
+        "cloudflare_api_token": os.environ["CLOUDFLARE_API_TOKEN"],
+        "index_queue_url": os.environ.get("INDEX_QUEUE_URL"),
+    }
+
+
+def load_indexing_config() -> dict:
+    """인덱싱 handler(index_opensearch.py)가 쓰는 설정: OpenSearch 접속 정보.
+
+    opensearch_user/opensearch_password는 os.environ.get(기본값 None) — local
+    모드(Docker, 무인증)에선 없는 게 정상이라 필수로 강제하면 안 된다. aws
+    모드에서 이 값이 실제로 필요한지는 indexing/opensearch_client.py가 판단한다
+    (거기서 없으면 명시적으로 실패).
+    """
+    return {
+        "opensearch_mode": os.environ["OPENSEARCH_MODE"],
+        "opensearch_host": os.environ["OPENSEARCH_HOST"],
+        "opensearch_port": int(os.environ["OPENSEARCH_PORT"]),
+        "opensearch_user": os.environ.get("OPENSEARCH_USER"),
+        "opensearch_password": os.environ.get("OPENSEARCH_PASSWORD"),
+        "opensearch_index_name": os.environ["OPENSEARCH_INDEX_NAME"],
     }

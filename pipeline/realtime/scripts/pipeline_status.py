@@ -48,6 +48,10 @@ EXTRACT_LOG_GROUPS = {
     "hwpx": "/aws/lambda/realtime-extract-hwpx-dev",
 }
 LLM_LOG_GROUP = "/aws/lambda/realtime-llm-extract-dev"
+EMBED_LOG_GROUP = "/aws/lambda/realtime-embed-dev"  # template.yaml RealtimeEmbedFunction(#64)
+# 인덱싱 Lambda는 아직 미배포(2026-07-10 결정, VPC 설정 후속 — RESULTS.md 참고).
+# 로그그룹 자체가 없으므로 fetch_related_logs가 ResourceNotFoundException을 잡아 건너뛴다.
+INDEX_LOG_GROUP = "/aws/lambda/realtime-index-dev"
 
 QUEUE_NAMES = {
     "pdf": "realtime-extract-pdf-queue",
@@ -181,7 +185,13 @@ def get_queue_stats(sqs) -> dict[str, dict[str, int]]:
 def _log_groups_for(status: FileStatus) -> list[str]:
     groups = [EXTRACT_LOG_GROUPS[status.ext]]
     if status.extracted_exists:
+        # LLM과 임베딩은 추출 완료 직후 병렬로 트리거되므로(extract_*.py의
+        # _send_to_embed_queue) 같은 조건에 같이 건다. 인덱싱은 그 뒤 단계라
+        # 이론상 embed 완료 후에나 로그가 생기지만, 로그그룹이 아직 없어서
+        # (미배포) 있어도 그만 없어도 그만 — 방어적으로 같이 넣어둔다.
         groups.append(LLM_LOG_GROUP)
+        groups.append(EMBED_LOG_GROUP)
+        groups.append(INDEX_LOG_GROUP)
     return groups
 
 
@@ -223,7 +233,15 @@ def fetch_related_logs(logs_client, status: FileStatus) -> list[dict]:
 
     events = []
     for group in _log_groups_for(status):
-        for row in _run_insights_query(logs_client, group, query, start_time, end_time):
+        try:
+            rows = _run_insights_query(logs_client, group, query, start_time, end_time)
+        except ClientError as e:
+            # 인덱싱 Lambda처럼 아직 배포 전이라 로그그룹 자체가 없는 경우
+            # (ResourceNotFoundException) — 해당 그룹만 조용히 건너뛴다.
+            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                continue
+            raise
+        for row in rows:
             fields = {f["field"]: f["value"] for f in row}
             raw_ts = fields.get("@timestamp", "")
             try:

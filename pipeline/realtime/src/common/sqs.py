@@ -56,3 +56,15 @@ def send_to_next_queue(message: dict) -> None:
         QueueUrl=load_config()["next_queue_url"],
         MessageBody=json.dumps(message, ensure_ascii=False),
     )
+
+
+def send_to_queue(queue_url: str, message: dict) -> None:
+    """load_config()의 고정 next_queue_url이 아니라 호출부가 지정한 큐로 보낸다.
+
+    한 handler가 서로 다른 두 큐로 분기해서 보내야 하는 경우(예: 추출 완료 후
+    LLM 큐 + 임베딩 큐로 동시 분기) send_to_next_queue 하나로는 표현이 안 돼 추가.
+    """
+    _get_client().send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps(message, ensure_ascii=False),
+    )
