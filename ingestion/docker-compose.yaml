@@ -1,7 +1,8 @@
-# Airflow 단일 노드 (LocalExecutor) — 메타DB는 같은 박스 Postgres 컨테이너, 수집+다운로드 DAG 전용.
-# Redis/Celery worker/Flower 없음 (LocalExecutor). 외부 RDS 없음 (postgres 컨테이너 내장).
+# Airflow 단일 노드 (LocalExecutor) — 메타DB는 같은 박스 Postgres 컨테이너, 수집+다운로드+RDS 적재 DAG.
+# Redis/Celery worker/Flower 없음 (LocalExecutor). 이 컨테이너 내장 postgres는 Airflow 메타DB일 뿐,
+# bid_table/bid_attachments가 있는 실제 서비스 RDS(bidmate-postgres 등)는 별도이며 DATABASE_URL로 접속.
 #
-# 사전 준비: .env 작성 (.env.example 참고), IAM 역할로 S3 접근.
+# 사전 준비: .env 작성 (.env.example 참고 — RDS 접속정보 포함), IAM 역할로 S3 접근.
 # 기동: docker compose up -d --build
 # UI: http://<EC2-IP>:8080
 
@@ -28,10 +29,16 @@ x-airflow-common: &airflow-common
     S3_BUCKET_NAME: ${S3_BUCKET_NAME}
     # AWS 자격증명은 EC2 IAM 역할(instance profile)로 자동 주입 — 키를 넣지 말 것.
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+    # ── load_daily_to_rds 태스크(db/load_curated_daily_to_rds.py)가 읽는 환경변수 ──
+    # db/는 ingestion/ 밖에 있어서 별도 마운트(BIDDING_AGENT_DB_HOME, 아래 volumes 참고)가 필요하다.
+    BIDDING_AGENT_DB_HOME: /opt/bidding-agent-db
+    DATABASE_URL: ${DATABASE_URL}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    # db/는 ingestion/ 밖(레포 루트 하위)이라 별도로 마운트해야 load_daily_to_rds 태스크가 찾는다.
+    - ../db:/opt/bidding-agent-db
     # repo 전체를 마운트 — DAG가 여기서 python raw_json_daily.py 등을 실행한다.
     - .:/opt/bidding-agent
   user: "${AIRFLOW_UID:-50000}:0"
