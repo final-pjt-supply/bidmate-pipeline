@@ -5,7 +5,7 @@
 코드의 `schema.py`(`FIELD_MAP` + `to_curated()`)와 1:1로 대응한다.
 
 - **원본 API 응답:** 업무구분당 113개 필드 (필드 선택 옵션 없음 — 호출하면 전부 반환)
-- **정제 결과:** **47개 필드** (원본 1:1 매핑 39 + 배열/객체 4 + 생성 1 + 주입 2 + 계산 1)
+- **정제 결과:** **47개 필드** (원본 1:1 매핑 38 + 조립(fallback) 1 + 배열/객체 4 + 생성 1 + 주입 2 + 계산 1)
 
 ---
 
@@ -13,7 +13,8 @@
 
 | 구분 | 개수 | 비고 |
 |---|---:|---|
-| 원본 1:1 매핑 (`FIELD_MAP`) | 39 | camelCase 원본 → snake_case 큐레이션 |
+| 원본 1:1 매핑 (`FIELD_MAP`) | 38 | camelCase 원본 → snake_case 큐레이션 |
+| 조립 (원본 키가 업무구분마다 다름) | 1 | `bdgt_amt` — `bdgtAmt`/`asignBdgtAmt` fallback (각주 ³) |
 | 배열/객체로 접음 | 4 | `attachments`, `jntcontrct_duty_rgn_nm`, `subsi_cnstty`, `cnstty_accot_shre_rate_list` |
 | 생성 (다른 필드 조합) | 1 | `bid_id` = `{공고번호}_{차수}` |
 | 주입 (수집기 외부 입력) | 2 | `bid_category`(업무구분), `raw_s3_key`(원본 위치) |
@@ -28,7 +29,8 @@
 ## 2. 최종 스키마 (47필드)
 
 PK = (`bid_ntce_no`, `bid_ntce_ord`) 복합키. 필드 순서는 `to_curated()` 출력 순서와 동일하다.
-`종류` 열: **1:1**=원본 단일필드 매핑 · **배열/객체**=여러 원본을 접음 · **생성/주입/계산**=아래 5절 참고.
+`종류` 열: **1:1**=원본 단일필드 매핑 · **조립**=원본 키가 업무구분마다 달라 fallback으로
+채택(아래 5절 참고) · **배열/객체**=여러 원본을 접음 · **생성/주입/계산**=아래 5절 참고.
 
 | # | 필드 | 타입 | 변환 | 출처(원본) | 종류 | 설명 |
 |---:|---|---|---|---|---|---|
@@ -50,7 +52,7 @@ PK = (`bid_ntce_no`, `bid_ntce_ord`) 복합키. 필드 순서는 `to_curated()` 
 | 16 | `rgst_dt` | timestamp | `_dt` | rgstDt | 1:1 | 등록일시 |
 | 17 | `chg_dt` | timestamp | `_dt` | chgDt | 1:1 | 변경일시 |
 | 18 | `presmpt_prce` | bigint | `_int` | presmptPrce | 1:1 | 추정가격(원) |
-| 19 | `bdgt_amt` | bigint | `_int` | asignBdgtAmt | 1:1 | 사업예산(원) ³ |
+| 19 | `bdgt_amt` | bigint | `_int` | bdgtAmt 우선, 없으면 asignBdgtAmt | 조립 | 사업예산(원) ³ |
 | 20 | `vat` | bigint | `_int` | VAT | 1:1 | 부가세(원) |
 | 21 | `govsply_amt` | bigint | `_int` | govsplyAmt | 1:1 | 관급자재액(원) |
 | 22 | `cntrct_cncls_mthd_nm` | text | `_txt` | cntrctCnclsMthdNm | 1:1 | 계약방법(수의/경쟁) |
@@ -86,10 +88,21 @@ PK = (`bid_ntce_no`, `bid_ntce_ord`) 복합키. 필드 순서는 `to_curated()` 
 
 ² `cnsttyAccotShreRateList`의 원본 형태(문자열/배열)가 표본으로 확정되지 않아, 현재 파서는
 **무손실 보존**을 우선한다 (3절 참고). 실데이터 확인 후 `[{nm, rate}]` 구조로 승격 예정.
+문자열인 경우 대괄호를 전부 제거한 뒤 구분자로 split한다 — 대괄호를 안 벗기면
+`"[토목공사업^100]"` → `["[토목공사업", "100]"]`처럼 토큰에 대괄호가 남는 버그가 있었고,
+맨 앞/뒤만 벗기는 방식(removeprefix/removesuffix)도 공종이 여럿이라 대괄호가 여러 그룹으로
+나뉘는 값(예: `"[전기^60],[기계^40]"`, 2026-07 cnstwk 표본에서 실제 확인)에서는 가운데
+그룹의 대괄호가 그대로 남아 같은 버그가 재발했다. 그래서 위치와 무관하게 대괄호 문자를
+전부 제거하도록 수정됨(2026-07).
 
-³ 스펙 명세는 `bdgtAmt`였으나 실제 응답(thng 표본)에는 그 키가 없고 `asignBdgtAmt`(배정예산금액,
-100% 채움)만 있어 이를 출처로 채택했다. 별도 `bdgtAmt` 필드가 특정 업무구분에만 존재하는지는
-cnstwk/servc 표본으로 재확인 필요.
+³ 스펙 명세는 `bdgtAmt`였으나 최초 조사 때 본 실제 응답(thng 표본)에는 그 키가 없고
+`asignBdgtAmt`(배정예산금액)만 있어 이를 출처로 채택했었다. 이후 cnstwk 표본으로 재확인한
+결과 **업무구분(biz_div)마다 실제 키가 다르다**: cnstwk는 `bdgtAmt`, thng/servc/frgcpt는
+`asignBdgtAmt`. cnstwk 전건이 `asignBdgtAmt`만 보다가 늘 null이 되던 버그의 원인이었고,
+현재는 `_bdgt_amt()`가 `bdgtAmt` → `asignBdgtAmt` 순서로 시도한다. 원문이 있다는 것만으로
+채택하지 않고 `_int()`로 실제 숫자 파싱이 되는지까지 확인한 뒤 채택한다 — 우선순위 키에
+"-" 같은 결측 플레이스홀더가 와도 파싱에 실패하면 다음 키로 넘어가고, 빈 문자열/`None`뿐
+아니라 정상적인 `0`은 그대로 유효한 값으로 채택한다(2026-07).
 
 ---
 
@@ -135,7 +148,9 @@ cnstwk/servc 표본으로 재확인 필요.
 ### `cnstty_accot_shre_rate_list` — 공종지분
 
 `cnsttyAccotShreRateList`를 파싱한다. 원본이 이미 배열/객체면 그대로 보존하고, 문자열이면
-구분자(`^ | ; ,`)로 나눠 토큰 배열로 만든다. 예: `"건축:70^토목:30"` → `["건축:70", "토목:30"]`.
+대괄호를 전부 제거한 뒤 구분자(`^ | ; ,`)로 나눠 토큰 배열로 만든다.
+예(단일 공종): `"[토목공사업^100]"` → `["토목공사업", "100"]`.
+예(복수 공종, 실측): `"[전기^60.1],[기계^39.9]"` → `["전기", "60.1", "기계", "39.9"]`.
 (원본 형태 확정 전까지 무손실 보존 우선 — 2절 각주 ² 참고.)
 
 ---
@@ -166,6 +181,7 @@ cnstwk/servc 표본으로 재확인 필요.
 | `bid_category` | 주입 | 수집기가 조회한 업무구분(오퍼레이션) 키를 `to_curated(record, bid_category, ...)`로 전달 |
 | `raw_s3_key` | 주입 | 이 레코드의 원본 JSON이 저장된 S3 객체 키. 수집기가 `to_curated(record, ..., raw_s3_key)`로 전달. daily와 backfill 모두 공고 1건 단위 원본 JSON 키를 넣는다 |
 | `expected_file_count` | 계산 | `len(attachments)` — 다운로드 단계가 실제 적재 수와 대조하는 기대치 |
+| `bdgt_amt` | 조립(fallback) | `bdgtAmt` 우선, 없으면 `asignBdgtAmt` — 업무구분마다 실제 키가 다름(각주 ³) |
 
 > `bid_category`·`raw_s3_key`는 수집 스크립트(`raw_json_daily.py`, `raw_json_backfill.py`)의
 > `to_curated()` 호출부에서 주입한다. 다운로드 스크립트는 `bid_category`를 읽어 S3 키의
@@ -180,7 +196,8 @@ cnstwk/servc 표본으로 재확인 필요.
   (`cnstrtsite_rgn_nm`, `rgn_duty_jntcontrct_*`, `jntcontrct_duty_rgn_nm`, `cmmn_spldmd_*`,
   `main_cnstty_*`, `cnstty_accot_shre_rate_list`, `subsi_cnstty`).
 - **출처 교체:** 상세 URL `bidNtceUrl` → `bidNtceDtlUrl`(실데이터 확인, 둘 다 존재하나 상세 링크 채택).
-  예산은 curated 필드명만 `asign_bdgt_amt` → `bdgt_amt`로 바꾸고 출처 `asignBdgtAmt`는 유지(각주 ³).
+  예산은 curated 필드명을 `asign_bdgt_amt` → `bdgt_amt`로 바꾸고, 출처도 업무구분별로 `bdgtAmt`/
+  `asignBdgtAmt`를 모두 시도하는 fallback으로 변경(각주 ³).
 - **제거:** 분류 계열(`ntceKindNm`, `srvceDivNm`, `pubPrcrmnt*` 4종), 담당자(`ofcl_nm`, `ofcl_tel`),
   평가비율(`techAbltEvlRt`, `bidPrceEvlRt`), `bidBeginDt`, `infoBizYn`, `chgNtceRsn`,
   `prcrmntClsfcNo` 등. 필요 시 `FIELD_MAP`에 `"필드": ("원본명", 변환함수)` 한 줄로 재추가 가능.

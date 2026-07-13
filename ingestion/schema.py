@@ -63,9 +63,23 @@ def _bool(value):
     return {"Y": True, "N": False}.get(_txt(value))
 
 
-# 원본 camelCase → curated snake_case 1:1 매핑 (39개).
+def _bdgt_amt(record):
+    """예산 금액. 업무구분(biz_div)마다 실제 원본 키가 다르게 관측된다: cnstwk는 bdgtAmt,
+    thng/servc/frgcpt는 asignBdgtAmt(2026-07 확인, cnstwk 전건이 asignBdgtAmt만 보고 null이
+    되던 버그의 원인). 우선순위 키에 "-" 같은 결측 플레이스홀더가 와도 다음 키로 폴백하도록,
+    원문 존재 여부가 아니라 _int() 파싱 성공 여부로 채택한다(실측: thng/frgcpt에 "", "0",
+    cnstwk엔 미확인이나 "-" 류 플레이스홀더가 흔한 편이라 방어).
+    """
+    for key in ("bdgtAmt", "asignBdgtAmt"):
+        value = _int(record.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+# 원본 camelCase → curated snake_case 1:1 매핑 (38개).
 # 생성/주입/계산/묶음 필드(bid_id, bid_category, attachments, expected_file_count,
-# raw_s3_key, jntcontrct_duty_rgn_nm, cnstty_accot_shre_rate_list, subsi_cnstty)는
+# raw_s3_key, jntcontrct_duty_rgn_nm, cnstty_accot_shre_rate_list, subsi_cnstty, bdgt_amt)는
 # 여러 원본 필드나 외부 입력이 필요하므로 FIELD_MAP이 아니라 to_curated()에서 조립한다.
 FIELD_MAP = {
     # 식별자
@@ -89,7 +103,7 @@ FIELD_MAP = {
     "chg_dt": ("chgDt", _dt),
     # 금액
     "presmpt_prce": ("presmptPrce", _int),
-    "bdgt_amt": ("asignBdgtAmt", _int),  # 스펙의 bdgtAmt는 실응답에 없음 → 실제 예산필드 asignBdgtAmt
+    # bdgt_amt는 to_curated()에서 별도 조립(업무구분별로 실제 키가 다름 — 아래 _bdgt_amt 참고).
     "vat": ("VAT", _int),
     "govsply_amt": ("govsplyAmt", _int),
     # 계약·낙찰 방식
@@ -147,8 +161,11 @@ def _subsi_cnstty(record):
 def _shre_rate_list(record):
     """cnsttyAccotShreRateList(공종지분) 파싱.
 
-    원본이 이미 배열/객체면 그대로 보존하고, 문자열이면 구분자(^ | ; ,)로 나눠
-    토큰 배열로 만든다. 원본 형태가 표본으로 확정되지 않아 무손실 보존을 우선한다.
+    원본이 이미 배열/객체면 그대로 보존하고, 문자열이면 대괄호를 전부 제거한 뒤 구분자
+    (^ | ; ,)로 나눠 토큰 배열로 만든다. 공종이 여럿이면 그룹별로 대괄호가 따로 붙는다
+    (실측: "[일반소방시설공사업(전기)^60.1],[일반소방시설공사업(기계)^39.9]") — 맨 앞/뒤
+    대괄호만 벗기면(removeprefix/removesuffix) 가운데 그룹의 대괄호가 그대로 남는 버그가
+    있었다. 대괄호는 구조 문자일 뿐 값에 의미 있게 등장하지 않는다고 보고 전부 제거한다.
     """
     value = record.get("cnsttyAccotShreRateList")
     if isinstance(value, list):
@@ -156,6 +173,7 @@ def _shre_rate_list(record):
     text = _txt(value)
     if text is None:
         return []
+    text = text.replace("[", "").replace("]", "")
     return [token.strip() for token in SHRE_RATE_SPLIT.split(text) if token.strip()]
 
 
@@ -187,6 +205,7 @@ def to_curated(record, bid_category, raw_s3_key=None):
     raw_s3_key: 이 레코드의 원본 JSON이 저장된 S3 객체 키 — 수집기가 주입.
     """
     mapped = {field: caster(record.get(source)) for field, (source, caster) in FIELD_MAP.items()}
+    mapped["bdgt_amt"] = _bdgt_amt(record)
     attachments = _attachments(record)
 
     return {
