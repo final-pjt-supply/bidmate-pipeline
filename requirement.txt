@@ -1,4 +1,4 @@
-pywin32
+pywin32; platform_system == "Windows"
 lxml
 boto3
 python-dotenv
@@ -7,3 +7,5 @@ pymupdf
 requests
 Pillow
 pytest
+psycopg[binary]
+tqdm

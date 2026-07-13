@@ -24,7 +24,7 @@ CREATE TABLE bid_table (
     chg_dt             TIMESTAMP,              -- API: chgDt
     -- 금액
     presmpt_prce       BIGINT,                 -- API: presmptPrce
-    asign_bdgt_amt     BIGINT,                 -- API: asignBdgtAmt
+    bdgt_amt           BIGINT,                 -- API: 업무구분마다 실제 키가 다름 — cnstwk는 bdgtAmt, thng/servc/frgcpt는 asignBdgtAmt (2026-07 확인, ingestion/schema.py의 _bdgt_amt()가 fallback 처리)
     vat                BIGINT,                 -- API: VAT (추정)
     govsply_amt        BIGINT,                 -- API: govsplyAmt (추정)
     -- 방식
