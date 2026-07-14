@@ -693,8 +693,14 @@ Resources:
   # NVIDIA Build API의 분당 요청 한도(40 RPM) 대비 ReservedConcurrentExecutions로 동시
   # 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼 동시에 확장해서 순식간에 RPM을
   # 초과시킬 수 있음). qwen3-next-80b 기준 실측 처리시간은 76~180초대(문서 크기 따라
-  # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), 동시성 5 기준
-  # 약 1.7~3.9 RPM(60s/180s*5 ~ 60s/76s*5)으로 한도(40 RPM) 대비 충분히 안전.
+  # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), RPM 한도만 보면
+  # 동시성 5도 충분히 안전(약 1.7~3.9 RPM, 60s/180s*5 ~ 60s/76s*5).
+  #
+  # 2026-07-14 (#78) 5 → 3으로 하향: RPM 한도와 별개로, DLQ redrive 시 밀린
+  # 문서가 한꺼번에 큐로 유입되면 NVIDIA API 동시 호출 버스트로 거절됨이
+  # 실측 확인됨(2026-07-10, DLQ 25건 — 400/500/504 혼재, 순간 동시 요청 수가
+  # 문제였지 RPM 누적 총량이 문제가 아니었음). 동시 실행 상한을 더 좁혀
+  # redrive 시 유량 자체를 제한한다.
   #
   # Timeout=900s(15분, AWS Lambda 허용 최대치): 기존 180s → 600s → 900s로 상향.
   # 실제 요청 단위 컷오프는 extractors/llm/client.py의 OpenAI 클라이언트
@@ -712,7 +718,7 @@ Resources:
       Role: !GetAtt RealtimeLlmExtractFunctionRole.Arn
       Timeout: 900
       MemorySize: 1024
-      ReservedConcurrentExecutions: 5
+      ReservedConcurrentExecutions: 3
       Environment:
         Variables:
           NVIDIA_API_KEY: !Ref NvidiaApiKey
