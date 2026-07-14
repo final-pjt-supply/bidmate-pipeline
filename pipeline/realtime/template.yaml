@@ -693,8 +693,14 @@ Resources:
   # NVIDIA Build API의 분당 요청 한도(40 RPM) 대비 ReservedConcurrentExecutions로 동시
   # 실행 수를 제한(안 걸면 SQS 트리거가 메시지 쌓인 만큼 동시에 확장해서 순식간에 RPM을
   # 초과시킬 수 있음). qwen3-next-80b 기준 실측 처리시간은 76~180초대(문서 크기 따라
-  # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), 동시성 5 기준
-  # 약 1.7~3.9 RPM(60s/180s*5 ~ 60s/76s*5)으로 한도(40 RPM) 대비 충분히 안전.
+  # 편차 큼 — 최초 추정치였던 "약 27초/건"은 실측과 안 맞아 폐기), RPM 한도만 보면
+  # 동시성 5도 충분히 안전(약 1.7~3.9 RPM, 60s/180s*5 ~ 60s/76s*5).
+  #
+  # 2026-07-14 (#78) 5 → 3으로 하향: RPM 한도와 별개로, DLQ redrive 시 밀린
+  # 문서가 한꺼번에 큐로 유입되면 NVIDIA API 동시 호출 버스트로 거절됨이
+  # 실측 확인됨(2026-07-10, DLQ 25건 — 400/500/504 혼재, 순간 동시 요청 수가
+  # 문제였지 RPM 누적 총량이 문제가 아니었음). 동시 실행 상한을 더 좁혀
+  # redrive 시 유량 자체를 제한한다.
   #
   # Timeout=900s(15분, AWS Lambda 허용 최대치): 기존 180s → 600s → 900s로 상향.
   # 실제 요청 단위 컷오프는 extractors/llm/client.py의 OpenAI 클라이언트
@@ -712,7 +718,7 @@ Resources:
       Role: !GetAtt RealtimeLlmExtractFunctionRole.Arn
       Timeout: 900
       MemorySize: 1024
-      ReservedConcurrentExecutions: 5
+      ReservedConcurrentExecutions: 3
       Environment:
         Variables:
           NVIDIA_API_KEY: !Ref NvidiaApiKey
@@ -803,8 +809,12 @@ Resources:
   # ~28페이지) 약 10~15초 + 대상 10건 처리(건당 S3 GetObject+병합+DB 쿼리) 약
   # 30초 — 실측 예상 1분 이내지만 다른 Lambda들의 "실측의 5~10배 여유" 관례를
   # 따름. bid_table 대상 행이 수백 건으로 늘면 이 값과 배치 전략을 재검토할 것.
-  # DRY_RUN 기본값 true — 실제 UPDATE는 배포 시 파라미터를 "false"로 명시
-  # 전달해야만 실행된다(common/config.load_merge_db_config 참고).
+  # DRY_RUN은 배포 시 넘기는 CloudFormation 파라미터가 아니라 아래 Environment에
+  # 직접 하드코딩된 값이다 — "false"로 실전 전환하려면 이 템플릿 자체를 고쳐야
+  # 한다(common/config.load_merge_db_config가 읽는 값). 현재 "true"(안전 기본값)로
+  # 되돌려뒀다 — 이 브랜치(#78, 콘텐츠 라우팅)를 sam deploy할 때 병합 배치가
+  # 의도치 않게 실전 UPDATE로 전환되는 걸 막기 위함. 병합 배치의 DRY_RUN=false
+  # 실전 전환은 별도 이슈에서 다시 다룬다.
   # EventInvokeConfig: 이 배치는 handler 내부에서 bid_id별 실패를 이미 격리하므로
   # (merge_qualifications.py), 호출 전체가 실패하는 경우는 대부분 콜드스타트의
   # DB 연결/스키마 가드 같은 구조적 문제다 — 즉시 재시도해도 똑같이 실패할
@@ -833,7 +843,7 @@ Resources:
           MERGE_DB_USER: !Ref MergeDbUser
           MERGE_DB_PASSWORD: !Ref MergeDbPassword
           SOURCE_BUCKET: !Ref SourceBucketName
-          DRY_RUN: "false"   # 2026-07-14 #75 대응(required_certs 타입 정정 + rollback + 상한) DRY_RUN 검증 완료(에러 0건, required_certs 정상 처리 확인) — 실전 전환
+          DRY_RUN: "true"   # 2026-07-14 #78 대응 — 이 브랜치(콘텐츠 라우팅) 배포가 병합 배치를 실전 전환시키지 않도록 안전 기본값으로 되돌림. 실전 전환(false)은 별도 이슈에서 다룸
       EventInvokeConfig:
         MaximumRetryAttempts: 0
         DestinationConfig:
