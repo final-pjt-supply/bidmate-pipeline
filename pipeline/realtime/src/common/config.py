@@ -85,4 +85,9 @@ def load_merge_db_config() -> dict:
         # 기본값 true — 실제 UPDATE는 명시적으로 DRY_RUN=false를 넣어야만 실행된다
         # (안전 기본값, #66 3단계 지시). "false"(대소문자 무관)일 때만 실제 실행.
         "dry_run": os.environ.get("DRY_RUN", "true").strip().lower() != "false",
+        # 회당 처리 대상 상한(2026-07-14 — 실전 timeout 300000ms 실측 대응).
+        # 초과분은 드랍하지 않고 다음 주기(5분)로 이월 — qual_status가
+        # pending/partial로 남아있어 다음 회차 fetch_merge_targets에 자연스럽게
+        # 다시 잡힌다.
+        "max_targets_per_run": int(os.environ.get("MERGE_MAX_TARGETS_PER_RUN", "200")),
     }

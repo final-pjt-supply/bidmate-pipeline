@@ -35,26 +35,28 @@ SCALAR_FIELDS = (
 
 # 값 객체 리스트 필드의 "같은 실체" 판정 키. 이 키가 같은데 나머지 필드 값이
 # 다르면 진짜 충돌(merge_conflicts에 기록). None이면 항목 자체를 키로 써서
-# 완전동일 항목만 dedupe하고 부분 충돌은 감지하지 않는다(내부 구조를 신뢰할
-# 근거가 없는 required_certs, 그리고 항목 전체가 곧 키인 item_codes).
+# 완전동일 항목만 dedupe하고 부분 충돌은 감지하지 않는다(항목 전체가 곧 키인
+# item_codes).
+# LLM 스키마(extractors/llm/schema.py) 기준 object list 필드만 여기 둔다.
+# required_certs는 스키마상 list[str]이라 여기 두지 않는다(2026-07-14 정정 —
+# 과거 여기 있었으나 dict 리스트로 잘못 취급돼 str 항목에 AttributeError 발생).
 OBJECT_LIST_FIELD_KEYS: dict[str, tuple[str, ...] | None] = {
     "item_codes": ("type", "code"),
     "performance_reqs": ("category", "basis"),
     "capacity_reqs": ("name",),
     "personnel_reqs": ("field", "grade"),
-    "required_certs": None,
 }
 
 # required_licenses는 or_group 재번호가 필요해 별도 함수(_merge_required_licenses)로 처리.
-# region_limit_names는 문자열 리스트라 별도 함수(_merge_string_list_field)로 처리.
-# 11(스칼라) + 5(OBJECT_LIST_FIELD_KEYS) + 1(required_licenses) + 1(region_limit_names) = 18.
+# region_limit_names/required_certs는 문자열 리스트라 별도 함수(_merge_string_list_field)로 처리.
+# 11(스칼라) + 4(OBJECT_LIST_FIELD_KEYS) + 1(required_licenses) + 1(region_limit_names) + 1(required_certs) = 18.
 
 # bid_table 자격요건 18개 컬럼 전체 — merge/db.py가 UPDATE 문의 SET 대상 컬럼
 # 목록을 여기서 그대로 가져다 쓴다(컬럼 목록을 두 곳에 따로 하드코딩하면 필드
 # 추가/삭제 시 어긋날 위험이 있어 단일 소스로 둔다).
 ALL_QUALIFICATION_FIELDS = (
     SCALAR_FIELDS
-    + ("region_limit_names", "required_licenses")
+    + ("region_limit_names", "required_licenses", "required_certs")
     + tuple(OBJECT_LIST_FIELD_KEYS.keys())
 )
 
@@ -90,9 +92,12 @@ def merge_qualification_documents(bid_id: str, documents: list[dict]) -> dict:
     per_doc_region_names = [(d["document_id"], d.get("region_limit_names")) for d in documents]
     merged["region_limit_names"] = _merge_string_list_field(per_doc_region_names) or None
 
+    per_doc_certs = [(d["document_id"], d.get("required_certs")) for d in documents]
+    merged["required_certs"] = _merge_string_list_field(per_doc_certs) or None
+
     for field, key_fields in OBJECT_LIST_FIELD_KEYS.items():
         per_doc_items = [(d["document_id"], d.get(field)) for d in documents]
-        value, conflict = _merge_object_list_field(field, per_doc_items, key_fields)
+        value, conflict = _merge_object_list_field(bid_id, field, per_doc_items, key_fields)
         merged[field] = value or None
         merge_conflicts.update(conflict)
 
@@ -125,7 +130,7 @@ def _merge_scalar_field(field_name: str, per_doc_values: list[tuple[str, object]
 
 
 def _merge_string_list_field(per_doc_items: list[tuple[str, list | None]]) -> list:
-    """region_limit_names 전용 — 문자열 값 합집합(순서 보존, 중복 제거).
+    """region_limit_names/required_certs 전용 — 문자열 값 합집합(순서 보존, 중복 제거).
     문자열 자체가 곧 키라 값 충돌 개념이 없다(다르면 그냥 다른 항목)."""
     seen: list = []
     for _, items in per_doc_items:
@@ -136,6 +141,7 @@ def _merge_string_list_field(per_doc_items: list[tuple[str, list | None]]) -> li
 
 
 def _merge_object_list_field(
+    bid_id: str,
     field_name: str,
     per_doc_items: list[tuple[str, list | None]],
     key_fields: tuple[str, ...] | None,
@@ -146,16 +152,31 @@ def _merge_object_list_field(
     나오면 merge_conflicts에 기록하고, 대표값은 먼저 나온 문서 것을 유지.
     key_fields가 None이면: 항목 전체를 키로 써서 완전동일 항목만 하나로
     합치고, 다른 항목은 그냥 별개 항목으로 합집합에 추가한다(충돌 없음 —
-    내부 스키마를 몰라 부분 키를 정할 근거가 없는 필드용, 예: required_certs).
+    내부 스키마를 몰라 부분 키를 정할 근거가 없는 필드용, 예: item_codes).
+
+    타입 방어: 이 필드는 LLM 스키마상 dict 리스트이지만, 스키마 위반으로
+    dict가 아닌 항목(예: str)이 섞여 들어올 수 있다(2026-07-13 실전 장애 —
+    required_certs가 이 경로로 잘못 분류돼 str 항목에 AttributeError 발생,
+    현재는 required_certs 자체는 문자열 리스트 경로로 정정됨). 이런 항목은
+    드랍하지 않고 str(item)을 키로 써서 그대로 합집합에 포함하며 WARNING을
+    남긴다.
     """
     merged: dict = {}
     conflicts: list = []
     for document_id, items in per_doc_items:
         for item in (items or []):
-            key = tuple(item.get(k) for k in key_fields) if key_fields else _stable_key(item)
+            if not isinstance(item, dict):
+                logger.warning(
+                    "%s 필드에 dict가 아닌 항목 발견(스키마 위반) — 드랍하지 않고 "
+                    "str(item)을 키로 처리: bid_id=%s document_id=%s 값=%r",
+                    field_name, bid_id, document_id, item,
+                )
+                key = str(item)
+            else:
+                key = tuple(item.get(k) for k in key_fields) if key_fields else _stable_key(item)
             if key not in merged:
                 merged[key] = (document_id, item)
-            elif key_fields and item != merged[key][1]:
+            elif key_fields and isinstance(item, dict) and item != merged[key][1]:
                 prev_document_id, prev_item = merged[key]
                 conflicts.append({
                     "key": dict(zip(key_fields, key)),

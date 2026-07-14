@@ -10,6 +10,13 @@ SQS 트리거 handler들과 달리 이벤트 페이로드를 쓰지 않는다(ev
 실패할 구조적 문제이기 때문이다. 반면 bid_id 하나의 병합 실패(_process_target
 내부)는 나머지 대상 처리를 막지 않는다 — 그 bid는 다음 회차에도 여전히
 pending/partial로 남아있어 자연스럽게 재시도된다.
+
+단, 그 실패 뒤의 conn.rollback() 자체가 또 실패하면 예외적으로 배치를 즉시
+중단한다(2026-07-14, #75 사고 대응) — rollback 실패는 커넥션 손상 가능성이
+높다는 신호라 그 커넥션으로 남은 대상을 계속 돌리면 전부 같은 이유로 실패해
+무의미한 실패 로그만 도배한다(사고 당일 실제로 겪은 증상). 처리 못 한 남은
+대상은 UPDATE 자체를 안 했으니 pending/partial 그대로이고, 다음 주기가 새
+커넥션으로 자연스럽게 다시 집는다.
 """
 import logging
 import time
@@ -44,6 +51,14 @@ def lambda_handler(event, _context):
 
     inv = inventory.build_inventory(config["source_bucket"])
 
+    max_targets = config["max_targets_per_run"]
+    if len(targets) > max_targets:
+        logger.info(
+            "이번 회차 %d건 처리, %d건 다음 주기로 이월",
+            max_targets, len(targets) - max_targets,
+        )
+        targets = targets[:max_targets]
+
     counts = {"merged": 0, "partial": 0, "failed": 0, "skipped": 0}
     conflict_bid_ids: list[str] = []
     error_bid_ids: list[str] = []
@@ -58,6 +73,15 @@ def lambda_handler(event, _context):
             logger.exception("bid_id 처리 중 예외 발생 — 건너뛰고 다음 대상 계속: bid_id=%s", bid_id)
             error_bid_ids.append(bid_id)
             log_merge_failed(bid_id, "unexpected_exception")
+            try:
+                conn.rollback()
+            except Exception:
+                logger.error(
+                    "conn.rollback() 자체가 실패함 — 커넥션 손상 가능성 높음, 배치 중단"
+                    "(남은 대상은 pending/partial 유지 — 다음 주기가 새 커넥션으로 처리): "
+                    "bid_id=%s", bid_id, exc_info=True,
+                )
+                break
             continue
 
         if outcome is None:

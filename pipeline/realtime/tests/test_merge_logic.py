@@ -84,13 +84,22 @@ def test_capacity_reqs_same_key_different_value_is_conflict():
     assert result["merge_conflicts"]["capacity_reqs"][0]["key"] == {"name": "장비A"}
 
 
-def test_required_certs_unkeyed_field_just_unions_without_conflict():
-    doc1 = _doc("doc01", required_certs=[{"foo": "a"}])
-    doc2 = _doc("doc02", required_certs=[{"foo": "b"}])
+def test_required_certs_is_string_list_union_dedupe():
+    doc1 = _doc("doc01", required_certs=["중소기업·소상공인확인서", "KC 인증"])
+    doc2 = _doc("doc02", required_certs=["KC 인증", "직접생산확인증명서"])
     result = logic.merge_qualification_documents("R25BK00000000_000", [doc1, doc2])
-    assert {"foo": "a"} in result["required_certs"]
-    assert {"foo": "b"} in result["required_certs"]
+    assert result["required_certs"] == ["중소기업·소상공인확인서", "KC 인증", "직접생산확인증명서"]
     assert result["merge_conflicts"] is None
+
+
+def test_object_list_field_non_dict_item_kept_and_warns(caplog):
+    doc1 = _doc("doc01", item_codes=["업종코드 1468"])
+    doc2 = _doc("doc02", item_codes=[{"type": "CPC", "code": "51312"}])
+    with caplog.at_level("WARNING"):
+        result = logic.merge_qualification_documents("R25BK00000000_000", [doc1, doc2])
+    assert "업종코드 1468" in result["item_codes"]
+    assert {"type": "CPC", "code": "51312"} in result["item_codes"]
+    assert any("dict가 아닌 항목" in r.message for r in caplog.records)
 
 
 def test_required_licenses_single_document_untouched():
