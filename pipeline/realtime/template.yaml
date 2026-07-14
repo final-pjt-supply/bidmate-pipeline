@@ -1,14 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  실시간 입찰공고 문서 처리 파이프라인 (2026-07-08 재구축, 2026-07-10 임베딩 분기 추가 #64).
+  실시간 입찰공고 문서 처리 파이프라인 (2026-07-08 재구축, 2026-07-10 임베딩 분기 추가,
+  2026-07-11 인덱싱 Lambda 배포, 2026-07-12 RDS 병합 배치 추가 #66).
   S3(bidmate) 업로드 → 이벤트 알림 → SQS(pdf/hwp/hwpx 3개) → 추출 Lambda 3개
   → extracted/ 저장 + (LLM 큐 / 임베딩 큐)로 병렬 분기 → LLM Lambda → qualifications/ 저장
-  / 임베딩 Lambda → vectors/ 저장. 인덱싱 Lambda(vectors/ → OpenSearch)는 후속 작업
-  (OpenSearch가 Private VPC 안이라 이번 배포 범위 밖, 2026-07-10 결정).
-  Step Functions는 쓰지 않는다 — 전부 SQS 메시지 체이닝으로 연결.
-  S3 이벤트 알림 자체는 이 template 밖에서 별도 스크립트(scripts/setup-s3-events.ps1)로
-  설정한다(이 배포엔 포함 안 함).
+  / 임베딩 Lambda → vectors/ 저장 → 인덱싱 Lambda(VPC 안, OpenSearch bulk 색인).
+  qualifications/ → bid_table UPDATE는 SQS 체이닝과 무관하게 EventBridge 주기
+  트리거로 별도 동작(RDS 병합 배치, #66). Step Functions는 안 쓰고 나머지는 전부
+  SQS 메시지 체이닝으로 연결. S3 이벤트 알림 자체는 이 template 밖에서 별도
+  스크립트(scripts/setup-s3-events.ps1)로 설정한다(이 배포엔 포함 안 함).
 
 Parameters:
   ExtractorImageUri:
@@ -76,6 +77,86 @@ Parameters:
     Description: >
       CloudWatch 알람(DLQ 적체 등) 통보를 받을 이메일. SNS 구독 방식이라 배포 후
       해당 주소로 오는 확인 메일의 링크를 눌러야 실제로 알림이 도착하기 시작한다.
+
+  # 2026-07-11 인덱싱 Lambda 배포 때 실제로 쓰였지만 이 template.yaml에는
+  # 커밋되지 않았던 파라미터들(IaC drift) — #66 작업 중 발견해 반영한다
+  # (2026-07-12, aws cloudformation get-template --template-stage Original로
+  # 실배포본과 대조 확인). 값 자체는 실배포와 동일.
+  OpenSearchHost:
+    Type: String
+    Default: "vpc-bidmate-search-duobze5kp7ajwj3e5fqy6r4dju.ap-northeast-2.es.amazonaws.com"
+    Description: OpenSearch 클러스터 엔드포인트(Private VPC 안, 다른 팀원 소유). hostname만(스킴 없이).
+
+  OpenSearchPort:
+    Type: String
+    Default: "443"
+
+  OpenSearchIndexName:
+    Type: String
+    Default: "bid_chunks"
+
+  OpenSearchUser:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      OpenSearch basic auth user. NvidiaApiKey와 동일하게
+      `sam deploy --parameter-overrides OpenSearchUser=<실제값>`처럼 CLI로 전달할 것.
+
+  OpenSearchPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: OpenSearch basic auth password. OpenSearchUser와 동일하게 CLI로 전달할 것.
+
+  # ============================================================
+  # 아래부터 RDS 병합 배치(#66) 전용 파라미터.
+  # ============================================================
+  MergeImageUri:
+    Type: String
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:085cfb01bdba1551106d72d2e81f346a4a86c70ee24bc4e80864664cecc26861
+    Description: >
+      RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). 2026-07-14 #75
+      대응(required_certs 타입 정정 + rollback + 회당 상한, 커밋 4f41e94)
+      빌드/푸시로 digest 갱신됨. :latest 금지 — CloudFormation이 태그 변경을
+      감지 못해 이미지가 바뀌어도 재배포가 안 될 수 있다. 이후 이미지를
+      다시 빌드/푸시할 때마다 이 Default를 새 digest로 갱신할 것.
+
+  MergeDbHost:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      RDS Postgres 엔드포인트(bidmate-postgres). Default 없음 — CLI로 명시
+      전달 필수: `sam deploy --parameter-overrides MergeDbHost=<실제값>`.
+
+  MergeDbName:
+    Type: String
+    NoEcho: true
+    Default: "bidmate"
+    Description: RDS DB 이름(2026-07-12 bastion 접속으로 확인된 실제 값).
+
+  MergeDbUser:
+    Type: String
+    NoEcho: true
+    Default: "bidmaster"
+    Description: RDS 접속 계정(2026-07-12 bastion 접속으로 확인된 실제 값. OpenSearchUser와 같은 계정명이나 별개 시스템).
+
+  MergeDbPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      RDS 접속 비밀번호. NvidiaApiKey와 동일한 관례 — samconfig.toml(git 커밋됨)에
+      절대 넣지 말고 `sam deploy --parameter-overrides MergeDbPassword=<실제값>`로만 전달.
+
+  MergeScheduleRate:
+    Type: String
+    Default: "rate(5 minutes)"
+    Description: >
+      RDS 병합 배치 실행 주기. 앞단 Airflow 수집 주기가 5분이라(2026-07-12
+      확인) 병합이 그보다 느리면 신선도 병목이 되므로 맞춤. LLM 추출 실측
+      처리시간(76~180초/문서, expected_file_count 1~2건 기준)에도 여유 있음.
 
 Resources:
   # ============================================================
@@ -162,6 +243,24 @@ Resources:
       VisibilityTimeout: 1800
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RealtimeEmbedDlq.Arn
+        maxReceiveCount: 3
+
+  # 2026-07-11 인덱싱 Lambda 배포 때 함께 만들어졌지만 template.yaml에는
+  # 커밋되지 않았던 큐들(IaC drift, #66에서 발견해 반영 — 위 OpenSearch
+  # 파라미터와 동일한 사유/확인 방법).
+  RealtimeIndexDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: realtime-index-queue-dlq
+      MessageRetentionPeriod: 1209600
+
+  RealtimeIndexQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: realtime-index-queue
+      VisibilityTimeout: 1800   # Lambda Timeout(300s)의 6배 — 추출/임베딩과 동일 관례
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RealtimeIndexDlq.Arn
         maxReceiveCount: 3
 
   # ============================================================
@@ -338,9 +437,8 @@ Resources:
                 Action: sqs:SendMessage
                 Resource: !GetAtt RealtimeEmbedQueue.Arn
 
-  # 인덱싱 큐 SendMessage 권한은 아직 없음 — 인덱싱 Lambda/큐는 후속 작업(#64,
-  # 2026-07-10 결정: 임베딩→S3 벡터 저장까지만 우선 배포). INDEX_QUEUE_URL을
-  # 나중에 실제로 붙일 때 이 role에 SendToIndexQueue 문을 추가해야 한다.
+  # SendToIndexQueue는 2026-07-11 인덱싱 Lambda 배포 때 실제로 추가됐지만
+  # template.yaml에는 커밋되지 않았던 문(IaC drift) — #66에서 발견해 반영.
   RealtimeEmbedFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -378,6 +476,51 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt RealtimeEmbedQueue.Arn
+              - Sid: SendToIndexQueue
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt RealtimeIndexQueue.Arn
+
+  # 2026-07-11 배포 때 실제로 있었지만 template.yaml에 커밋되지 않았던 역할
+  # (IaC drift, #66에서 발견해 반영). OpenSearch가 Private VPC 안에 있어
+  # AWSLambdaVPCAccessExecutionRole이 필요하다(ENI 생성/해제 권한 — 인덱싱
+  # 403 인시던트가 정확히 이걸 빼먹은 사례였다, #66 SAM 설계 단계에서
+  # 재확인). OpenSearch 인증은 SigV4가 아니라 basic auth(indexing/
+  # opensearch_client.py 참고)라 IAM에 OpenSearch 관련 Action은 없다.
+  RealtimeIndexFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: realtime-index-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: realtime-index-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadVectors
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/vectors/*"
+        - PolicyName: realtime-index-sqs-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReceiveFromOwnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt RealtimeIndexQueue.Arn
 
   # LLM 역할은 파이프라인 마지막 단계라 다음 큐로 보낼 SendMessage 권한이 없다.
   RealtimeLlmExtractFunctionRole:
@@ -417,6 +560,63 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt RealtimeLlmExtractQueue.Arn
+
+  # RDS 병합 배치(#66) 역할. EventBridge 스케줄 트리거라 SQS 권한이 필요 없다.
+  # RDS가 Private VPC 안에 있어 AWSLambdaVPCAccessExecutionRole 필수(ENI
+  # 생성/해제 — 위 인덱싱 역할과 동일한 이유, 인덱싱 403 인시던트 교훈).
+  RealtimeMergeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: realtime-merge-function-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: realtime-merge-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadQualifications
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/qualifications/*"
+              - Sid: ListQualificationsForInventory
+                # merge/inventory.py의 build_inventory가 list_objects_v2로
+                # qualifications/ 전체를 리스팅한다 — GetObject만 주고
+                # ListBucket을 빼먹으면 인덱싱 403 인시던트와 똑같은 실수가
+                # 된다(#62 교훈, #66 SAM 설계 단계에서 명시적으로 챙김).
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix: "qualifications/*"
+        - PolicyName: realtime-merge-sns-publish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PublishFailureToAlerts
+                # Lambda 비동기 호출 Destinations(RealtimeMergeFunction의
+                # EventInvokeConfig.DestinationConfig.OnFailure)는 EventBridge나
+                # Lambda 서비스 role이 대상에 쓰는 게 아니라, 호출된 함수 "자신의"
+                # 실행 role 권한으로 쓴다 — 2차 배포 시도에서 이 권한이 없어
+                # EventInvokeConfig 생성 자체가 거부되는 것으로 확인됨. 다른
+                # SQS 트리거 Lambda role들엔 이 권한이 없어도 되는 이유:
+                # (1) 그 Lambda들의 실패 처리는 EventInvokeConfig가 아니라
+                # SQS RedrivePolicy(큐 레벨)로 SQS 서비스가 직접 처리하고,
+                # (2) DLQ 알람의 SNS 발행은 CloudWatch 서비스가 알람 액션으로
+                # 호출한다(토픽 정책이 cloudwatch.amazonaws.com을 허용) — 둘 다
+                # Lambda 실행 role과 무관한 경로라 이 권한이 필요 없었다.
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref RealtimeAlertsTopic
 
   # ============================================================
   # Lambda — pdf/hwp/hwpx 3개는 이미지 1개 공유(ExtractorImageUri) + CMD만 다르게.
@@ -525,13 +725,11 @@ Resources:
             Queue: !GetAtt RealtimeLlmExtractQueue.Arn
             BatchSize: 1
 
-  # 2026-07-10 결정: 인덱싱 Lambda·VPC 설정은 후속으로 미루고 임베딩→S3 벡터
-  # 저장 구간만 먼저 배포/검증한다(OpenSearch가 Private VPC 안이라 지금은 로컬
-  # 검증도 안 되고 조원과 인덱스 공유 조율도 남아있음). 그래서 이 함수는 VPC
-  # 밖에 남는다(Cloudflare 외부 API 호출 때문 — VPC 안에 넣으면 인터넷이 막힘)
-  # 그대로고, INDEX_QUEUE_URL 환경변수도 아직 안 넣는다(pipeline/realtime/src/
-  # common/config.py의 load_embedding_config()가 os.environ.get()으로 읽어
-  # 없으면 handler가 인덱싱 큐 전송만 건너뛰고 S3 저장은 그대로 완료).
+  # 이 함수는 VPC 밖에 남는다(Cloudflare 외부 API 호출 때문 — VPC 안에 넣으면
+  # 인터넷이 막힘). INDEX_QUEUE_URL은 2026-07-11 인덱싱 Lambda 배포 시점에
+  # 실제로 연결됐다(아래 RealtimeIndexFunction 참고) — 이 주석은 원래
+  # "인덱싱은 후속으로 미룸" 상태를 설명했는데, template.yaml이 그 이후의
+  # 실배포 상태를 못 따라간 것(IaC drift)을 #66 작업 중 발견해 지금 반영한다.
   # Timeout=300s: 로컬 검증(experiments/embedding)에서 실측한 최대 단일 문서
   # 청크수(656개, ms_per_chunk 실측 46.2ms 기준 약 30초) 대비 10배 여유 —
   # #62(오전 LLM 타임아웃 인시던트) 교훈으로 여유를 크게 둠. VisibilityTimeout은
@@ -551,12 +749,103 @@ Resources:
         Variables:
           CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
           CLOUDFLARE_API_TOKEN: !Ref CloudflareApiToken
+          INDEX_QUEUE_URL: !Ref RealtimeIndexQueue
       Events:
         EmbedQueueEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt RealtimeEmbedQueue.Arn
             BatchSize: 1
+
+  # 2026-07-11 배포됐지만 template.yaml에 커밋되지 않았던 함수(IaC drift, #66
+  # 발견/반영 — 위 파라미터·큐·역할과 동일 건). OpenSearch가 Private VPC
+  # 안에 있어 이 함수는 VpcConfig가 필요하다(embed와 반대로 여기는 VPC 안).
+  # 이미지는 EmbeddingImageUri를 그대로 공유한다(Dockerfile.embedding에
+  # index_opensearch.py/indexing/도 같이 들어있음 — pdf/hwp/hwpx가
+  # ExtractorImageUri를 공유하는 것과 동일 패턴, Command만 다르게 오버라이드).
+  RealtimeIndexFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: realtime-index-dev
+      PackageType: Image
+      ImageUri: !Ref EmbeddingImageUri
+      ImageConfig:
+        Command: ["handlers.index_opensearch.lambda_handler"]
+      Role: !GetAtt RealtimeIndexFunctionRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      VpcConfig:
+        SubnetIds:
+          - subnet-0348f5a655ef2f9b5
+          - subnet-0097fa998d43ebf09
+        SecurityGroupIds:
+          - sg-065449fe7966d3012   # realtime-indexing-sg, OpenSearch SG의 443 인바운드 허용대상
+      Environment:
+        Variables:
+          OPENSEARCH_MODE: aws
+          OPENSEARCH_HOST: !Ref OpenSearchHost
+          OPENSEARCH_PORT: !Ref OpenSearchPort
+          OPENSEARCH_INDEX_NAME: !Ref OpenSearchIndexName
+          OPENSEARCH_USER: !Ref OpenSearchUser
+          OPENSEARCH_PASSWORD: !Ref OpenSearchPassword
+      Events:
+        IndexQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RealtimeIndexQueue.Arn
+            BatchSize: 1
+
+  # ============================================================
+  # RDS 병합 배치(#66) — EventBridge 주기 트리거, SQS 체이닝과 무관한 별도 흐름.
+  # 이미지 분리 이유는 Dockerfile.merge 주석 참고. VPC/서브넷은 인덱싱과 동일
+  # (RDS·서브넷이 같은 VPC), SG만 병합 전용(realtime-merge-sg)으로 다르다.
+  # Timeout=300s 근거: qualifications/ 전체 리스팅(2026-07-12 기준 27,428건,
+  # ~28페이지) 약 10~15초 + 대상 10건 처리(건당 S3 GetObject+병합+DB 쿼리) 약
+  # 30초 — 실측 예상 1분 이내지만 다른 Lambda들의 "실측의 5~10배 여유" 관례를
+  # 따름. bid_table 대상 행이 수백 건으로 늘면 이 값과 배치 전략을 재검토할 것.
+  # DRY_RUN 기본값 true — 실제 UPDATE는 배포 시 파라미터를 "false"로 명시
+  # 전달해야만 실행된다(common/config.load_merge_db_config 참고).
+  # EventInvokeConfig: 이 배치는 handler 내부에서 bid_id별 실패를 이미 격리하므로
+  # (merge_qualifications.py), 호출 전체가 실패하는 경우는 대부분 콜드스타트의
+  # DB 연결/스키마 가드 같은 구조적 문제다 — 즉시 재시도해도 똑같이 실패할
+  # 가능성이 높아 MaximumRetryAttempts=0으로 두고, 대신 실패 즉시 기존
+  # RealtimeAlertsTopic(SNS)으로 알린다. SQS DLQ처럼 메시지가 쌓이는 구조가
+  # 아니라 "실패한 호출 1건" 알림이라는 점이 기존 DLQ 알람들과 다르다.
+  RealtimeMergeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: realtime-merge-dev
+      PackageType: Image
+      ImageUri: !Ref MergeImageUri
+      Role: !GetAtt RealtimeMergeFunctionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      VpcConfig:
+        SubnetIds:
+          - subnet-0348f5a655ef2f9b5
+          - subnet-0097fa998d43ebf09
+        SecurityGroupIds:
+          - sg-08ae3328fa7784b6f   # realtime-merge-sg
+      Environment:
+        Variables:
+          MERGE_DB_HOST: !Ref MergeDbHost
+          MERGE_DB_NAME: !Ref MergeDbName
+          MERGE_DB_USER: !Ref MergeDbUser
+          MERGE_DB_PASSWORD: !Ref MergeDbPassword
+          SOURCE_BUCKET: !Ref SourceBucketName
+          DRY_RUN: "false"   # 2026-07-14 #75 대응(required_certs 타입 정정 + rollback + 상한) DRY_RUN 검증 완료(에러 0건, required_certs 정상 처리 확인) — 실전 전환
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        DestinationConfig:
+          OnFailure:
+            Type: SNS
+            Destination: !Ref RealtimeAlertsTopic
+      Events:
+        MergeSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref MergeScheduleRate
+            Enabled: true
 
   # ============================================================
   # SNS — 알람 통보용. 2026-07-09~10 IAM 권한 누락 인시던트가 액션 없는
@@ -675,6 +964,27 @@ Resources:
       AlarmActions:
         - !Ref RealtimeAlertsTopic
 
+  # 2026-07-11 배포됐지만 template.yaml에 커밋되지 않았던 알람(IaC drift, #66
+  # 발견/반영).
+  RealtimeIndexDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-index-queue-dlq-has-messages
+      AlarmDescription: realtime-index-queue-dlq에 메시지가 1개 이상 쌓임.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RealtimeIndexDlq.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
+
   RealtimeLlmExtractDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -716,6 +1026,30 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref RealtimeAlertsTopic
+
+  # RDS 병합 배치(#66)는 SQS가 아니라 EventBridge 스케줄 트리거라 DLQ
+  # has-messages 알람 패턴을 그대로 못 쓴다(위 RealtimeMergeFunction 주석의
+  # EventInvokeConfig 설명 참고) — 대신 Lambda 자체의 Errors 메트릭을 본다.
+  # handler가 bid_id별 실패를 이미 격리하므로, 이 알람이 울린다는 건 대부분
+  # 콜드스타트의 DB 연결/스키마 가드 실패 같은 구조적 문제라는 뜻이다.
+  RealtimeMergeErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: realtime-merge-function-errors
+      AlarmDescription: realtime-merge-dev Lambda가 1회 이상 에러로 실패함.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RealtimeMergeFunction
+      Statistic: Sum
+      Period: 300   # MergeScheduleRate(기본 5분, 2026-07-12 Airflow 주기 맞춤)와 일치
+      EvaluationPeriods: 1
+      Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:

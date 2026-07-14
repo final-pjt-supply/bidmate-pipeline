@@ -65,3 +65,29 @@ def load_indexing_config() -> dict:
         "opensearch_password": os.environ.get("OPENSEARCH_PASSWORD"),
         "opensearch_index_name": os.environ["OPENSEARCH_INDEX_NAME"],
     }
+
+
+def load_merge_db_config() -> dict:
+    """RDS 병합 배치(merge/db.py, #66)가 쓰는 설정: RDS Postgres 접속 정보 +
+    qualifications/ 대상 S3 버킷 + DRY_RUN 플래그.
+
+    db_password는 절대 코드에 하드코딩하지 않고 환경변수(Lambda Environment
+    Variables)로만 받는다. 추후 Secrets Manager로 교체할 때도 이 함수 안만
+    바꾸면 되게, DB 접속 정보를 읽는 지점을 여기 하나로 모아둔다.
+    """
+    return {
+        "db_host": os.environ["MERGE_DB_HOST"],
+        "db_port": int(os.environ.get("MERGE_DB_PORT", "5432")),
+        "db_name": os.environ["MERGE_DB_NAME"],
+        "db_user": os.environ["MERGE_DB_USER"],
+        "db_password": os.environ["MERGE_DB_PASSWORD"],
+        "source_bucket": os.environ.get("SOURCE_BUCKET", "bidmate"),
+        # 기본값 true — 실제 UPDATE는 명시적으로 DRY_RUN=false를 넣어야만 실행된다
+        # (안전 기본값, #66 3단계 지시). "false"(대소문자 무관)일 때만 실제 실행.
+        "dry_run": os.environ.get("DRY_RUN", "true").strip().lower() != "false",
+        # 회당 처리 대상 상한(2026-07-14 — 실전 timeout 300000ms 실측 대응).
+        # 초과분은 드랍하지 않고 다음 주기(5분)로 이월 — qual_status가
+        # pending/partial로 남아있어 다음 회차 fetch_merge_targets에 자연스럽게
+        # 다시 잡힌다.
+        "max_targets_per_run": int(os.environ.get("MERGE_MAX_TARGETS_PER_RUN", "200")),
+    }

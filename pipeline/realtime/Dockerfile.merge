@@ -1,0 +1,34 @@
+# RDS 병합 배치 전용 이미지(#66) — embedding/indexing 이미지와 분리한다.
+# psycopg2-binary만 이 함수에 필요하고 openai/opensearch-py는 전혀 안 쓴다(반대도
+# 마찬가지) — 의존성이 겹치지 않는다. 또한 RDS 병합 배치는 아직 한 번도 배포된
+# 적 없는 신규 컴포넌트라, 이미 정상 동작 중인 embed/index Lambda(Dockerfile.
+# embedding 공유)와 이미지를 같이 쓰면 이쪽 반복 수정마다 그 두 Lambda의 이미지
+# digest까지 매번 바뀌어 불필요하게 재배포된다(#66 SAM 설계 단계 결정).
+#
+# 빌드는 리포 루트에서:
+#   docker build --provenance=false --sbom=false -f pipeline/realtime/Dockerfile.merge -t bidding-agent-realtime-merge .
+# ⚠ --provenance=false --sbom=false 필수 — Dockerfile.llm/embedding과 동일 이유
+# (BuildKit 기본 OCI image index를 Lambda가 지원 안 함).
+FROM public.ecr.aws/lambda/python:3.13
+# Python 3.13: 다른 realtime 이미지들과 동일 근거 — 이 이미지엔 구버전 호환이
+# 필요한 패키지가 없다.
+
+COPY pipeline/realtime/requirements-merge.txt /tmp/requirements-merge.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-merge.txt
+
+# common/: config, paths, s3, logs만 있으면 된다(sqs.py는 이 Lambda가 SQS 트리거가
+# 아니라 안 쓰고, result.py는 추출 handler 전용이라 제외).
+COPY pipeline/realtime/src/common/__init__.py ${LAMBDA_TASK_ROOT}/common/__init__.py
+COPY pipeline/realtime/src/common/config.py ${LAMBDA_TASK_ROOT}/common/config.py
+COPY pipeline/realtime/src/common/paths.py ${LAMBDA_TASK_ROOT}/common/paths.py
+COPY pipeline/realtime/src/common/s3.py ${LAMBDA_TASK_ROOT}/common/s3.py
+COPY pipeline/realtime/src/common/logs.py ${LAMBDA_TASK_ROOT}/common/logs.py
+
+# merge/: 순수 병합 로직(logic.py) + S3 인벤토리(inventory.py) + RDS 접속(db.py).
+COPY pipeline/realtime/src/merge/ ${LAMBDA_TASK_ROOT}/merge/
+
+# handlers/: merge_qualifications.py만 필요.
+COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
+COPY pipeline/realtime/src/handlers/merge_qualifications.py ${LAMBDA_TASK_ROOT}/handlers/merge_qualifications.py
+
+CMD ["handlers.merge_qualifications.lambda_handler"]
