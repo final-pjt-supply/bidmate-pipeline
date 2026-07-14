@@ -8,7 +8,7 @@ from common import paths, s3, sqs
 from common.config import load_config
 from common.logs import log_process_done, log_process_skip, log_process_start
 from common.result import build_result
-from extractors import router
+from extractors import pdf
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _process(bucket: str, key: str) -> None:
     start = time.monotonic()
     try:
         raw_bytes = s3.get_object(bucket, key)
-        extracted = router.dispatch(raw_bytes, key)
+        extracted = pdf.extract(raw_bytes)
         result = build_result(bid_id, document_id, extracted["pages"])
 
         s3.put_object(bucket, extracted_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
