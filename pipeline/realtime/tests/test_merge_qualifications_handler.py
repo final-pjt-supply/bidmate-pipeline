@@ -62,8 +62,13 @@ def test_no_targets_short_circuits_without_building_inventory(monkeypatch):
 
 
 def test_target_with_no_files_found_is_skipped(monkeypatch):
-    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [_target()])
-    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {})  # 인벤토리에 없음
+    """#80부터 인벤토리에 아예 없는 bid_id는 핸들러 단계에서 걸러져 여기까지
+    오지 않는다(아래 test_target_absent_from_inventory_excluded_before_cap 참고).
+    이 테스트는 인벤토리엔 있지만(멤버십 통과) refs가 빈 방어적 경합 상황만
+    남겨 _process_target의 found_file_count<=0 분기를 검증한다."""
+    target = _target()
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [target])
+    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {target["bid_id"]: []})
     apply_merge_calls = []
     monkeypatch.setattr(db, "apply_merge", lambda *a, **k: apply_merge_calls.append((a, k)))
 
@@ -220,6 +225,97 @@ def test_targets_within_cap_are_not_deferred(monkeypatch, caplog):
 
     assert result["total"] == 1
     assert not any("다음 주기로 이월" in r.message for r in caplog.records)
+
+
+def test_target_absent_from_inventory_excluded_before_cap(monkeypatch, caplog):
+    """#80 — daily 인벤토리에 없는 대상(=backfill 소관 행 시뮬레이션)은 상한
+    적용 전에 제외돼야 한다. 상한을 1로 좁혀도 daily 인벤토리에 있는 대상만
+    남아 상한을 다 안 써도 처리돼야 함을 함께 확인한다."""
+    capped_config = {**FAKE_CONFIG, "max_targets_per_run": 1}
+    monkeypatch.setattr(handler, "load_merge_db_config", lambda: capped_config)
+    backfill_only_target = _target(bid_id="R25BK09000000_000")  # 인벤토리에 없음
+    daily_target = _target(bid_id="R25BK01000000_000")
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [backfill_only_target, daily_target])
+    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {daily_target["bid_id"]: ["ref1"]})
+    monkeypatch.setattr(inventory, "fetch_documents", lambda bucket, refs: [{"bid_id": daily_target["bid_id"]}])
+    monkeypatch.setattr(handler, "merge_qualification_documents",
+                         lambda bid_id, docs: {"merge_conflicts": None})
+    monkeypatch.setattr(db, "has_failed_attachment", lambda conn, no, ord_: False)
+    monkeypatch.setattr(handler, "determine_qual_status", lambda found, expected, failed: "merged")
+    monkeypatch.setattr(db, "apply_merge", lambda *a, **k: None)
+
+    with caplog.at_level("INFO"):
+        result = handler.lambda_handler({}, None)
+
+    assert result["total"] == 1
+    assert result["merged"] == 1
+    # 상한(1건) 때문이 아니라 인벤토리 필터로 daily_matched가 이미 1건이었어야 함
+    assert any("MERGE_TARGET_FUNNEL db_total=2 daily_matched=1 after_cap=1" in r.message
+               for r in caplog.records)
+    assert not any("다음 주기로 이월" in r.message for r in caplog.records)
+
+
+def test_partial_status_target_present_in_inventory_is_included(monkeypatch):
+    """partial 재처리는 fetch_merge_targets의 기존 조건이 담당하므로(#80 설계
+    결정) 핸들러는 qual_status를 따로 안 가린다 — 인벤토리에만 있으면 처리
+    대상에 포함돼야 한다."""
+    target = _target(bid_id="R25BK01000000_000")
+    target["qual_status"] = "partial"
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [target])
+    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {target["bid_id"]: ["ref1"]})
+    monkeypatch.setattr(inventory, "fetch_documents", lambda bucket, refs: [{"bid_id": target["bid_id"]}])
+    monkeypatch.setattr(handler, "merge_qualification_documents",
+                         lambda bid_id, docs: {"merge_conflicts": None})
+    monkeypatch.setattr(db, "has_failed_attachment", lambda conn, no, ord_: False)
+    monkeypatch.setattr(handler, "determine_qual_status", lambda found, expected, failed: "merged")
+    monkeypatch.setattr(db, "apply_merge", lambda *a, **k: None)
+
+    result = handler.lambda_handler({}, None)
+
+    assert result["total"] == 1
+    assert result["merged"] == 1
+
+
+def test_daily_matched_over_cap_truncated_to_max(monkeypatch, caplog):
+    """daily 인벤토리 매칭 건수가 상한(200)을 넘으면 그 매칭된 목록 안에서만
+    잘라야 한다(백필은 애초에 인벤토리 필터에서 이미 빠진 뒤의 잘림)."""
+    targets = [_target(bid_id=f"R25BK{i:08d}_000") for i in range(210)]
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: targets)
+    monkeypatch.setattr(inventory, "build_inventory",
+                         lambda bucket: {t["bid_id"]: ["ref1"] for t in targets})
+    monkeypatch.setattr(inventory, "fetch_documents", lambda bucket, refs: [{"bid_id": "x"}])
+    monkeypatch.setattr(handler, "merge_qualification_documents",
+                         lambda bid_id, docs: {"merge_conflicts": None})
+    monkeypatch.setattr(db, "has_failed_attachment", lambda conn, no, ord_: False)
+    monkeypatch.setattr(handler, "determine_qual_status", lambda found, expected, failed: "merged")
+    monkeypatch.setattr(db, "apply_merge", lambda *a, **k: None)
+
+    with caplog.at_level("INFO"):
+        result = handler.lambda_handler({}, None)
+
+    assert result["total"] == 200
+    assert result["merged"] == 200
+    assert any("MERGE_TARGET_FUNNEL db_total=210 daily_matched=210 after_cap=200" in r.message
+               for r in caplog.records)
+
+
+def test_zero_daily_matched_logs_no_targets_and_returns_zero_summary(monkeypatch, caplog):
+    """DB 대상은 있었지만(전부 백필 소관이라 가정) daily 인벤토리에 하나도
+    안 걸리면 MERGE_NO_TARGETS를 찍고 기존 '대상 0건' 조기 반환과 같은 모양의
+    summary를 반환해야 한다."""
+    backfill_only = [_target(bid_id="R25BK09000000_000"), _target(bid_id="R25BK09000001_000")]
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: backfill_only)
+    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {})  # daily 파일 전혀 없음
+    apply_merge_calls = []
+    monkeypatch.setattr(db, "apply_merge", lambda *a, **k: apply_merge_calls.append(a))
+
+    with caplog.at_level("INFO"):
+        result = handler.lambda_handler({}, None)
+
+    assert result == {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
+                       "conflict_bid_ids": [], "error_bid_ids": []}
+    assert apply_merge_calls == []
+    assert any("MERGE_NO_TARGETS db_total=2" in r.message for r in caplog.records)
 
 
 def test_cold_start_connection_failure_propagates_without_catching(monkeypatch):

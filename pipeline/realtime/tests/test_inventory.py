@@ -22,7 +22,18 @@ DAILY_KEY = (
 LAST_MODIFIED = datetime(2026, 7, 9, 5, 32, 44, tzinfo=timezone.utc)
 
 
+def test_qualifications_prefix_is_daily_only():
+    """#80 — 백필(qualifications/backfill/)은 조원 파이프라인 소관이라 병합
+    대상에서 영구 제외한다. list_objects가 daily/ 밑만 보도록 prefix 자체가
+    좁혀져 있어야 한다(운영에서 실제로 backfill 키가 반환될 일이 없음)."""
+    assert inventory.QUALIFICATIONS_PREFIX == "qualifications/daily/"
+
+
 def test_parse_key_backfill_without_hour():
+    """_parse_key 자체는 stage를 안 가리므로(파싱 유틸 단위테스트) backfill 키도
+    형식만 맞으면 파싱된다 — 실제로 backfill이 인벤토리에 안 들어가는 건
+    QUALIFICATIONS_PREFIX가 daily/로 좁혀져 list_objects가 애초에 그 키를 안
+    돌려주기 때문(위 테스트 + build_inventory 테스트가 그 경로를 검증)."""
     result = inventory._parse_key(BACKFILL_KEY)
     assert result == ("R25BK01152374_000", "doc01")
 
@@ -36,20 +47,21 @@ def test_parse_key_rejects_malformed_key():
     assert inventory._parse_key("qualifications/backfill/not-a-valid-key.json") is None
 
 
-def test_build_inventory_groups_by_bid_id(monkeypatch):
+def test_build_inventory_calls_list_objects_with_daily_prefix_only(monkeypatch):
+    """build_inventory가 s3.list_objects에 넘기는 prefix가 daily/로 고정돼
+    있는지 — 이 자체가 backfill을 인벤토리에서 원천 배제하는 지점이다."""
     def fake_list_objects(bucket, prefix):
         assert bucket == "bidmate"
-        assert prefix == inventory.QUALIFICATIONS_PREFIX
-        yield {"key": BACKFILL_KEY, "last_modified": LAST_MODIFIED}
+        assert prefix == "qualifications/daily/"
         yield {"key": DAILY_KEY, "last_modified": LAST_MODIFIED}
 
     monkeypatch.setattr(s3, "list_objects", fake_list_objects)
 
     result = inventory.build_inventory("bidmate")
-    assert set(result.keys()) == {"R25BK01152374_000", "R26BK01623782_000"}
-    ref = result["R25BK01152374_000"][0]
-    assert ref.s3_key == BACKFILL_KEY
-    assert ref.document_id == "doc01"
+    assert set(result.keys()) == {"R26BK01623782_000"}
+    ref = result["R26BK01623782_000"][0]
+    assert ref.s3_key == DAILY_KEY
+    assert ref.document_id == "doc02"
     assert ref.last_modified == LAST_MODIFIED.isoformat()
 
 

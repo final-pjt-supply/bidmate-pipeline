@@ -53,9 +53,13 @@ def log_process_skip(bid_id: str, document_id: str, reason: str) -> None:
 # RDS 병합 배치(merge/handlers/merge_qualifications.py, #66) 전용 이벤트 어휘.
 # 위 PROCESS_*는 "문서 하나"가 단위지만 병합 배치는 "bid_id(공고) 하나"가
 # 처리 단위라 document_id를 강제하지 않는 별도 토큰을 쓴다.
-# - MERGE_START/DONE/SKIP : bid_id 하나의 병합 시도/완료/건너뜀(파일 미도착 등)
-# - MERGE_FAILED          : bid_id 하나의 병합 중 예외(배치 전체는 계속 진행)
-# - BATCH_SUMMARY         : 배치 1회 실행의 전체 집계(맨 마지막에 1번만)
+# - MERGE_START/DONE/SKIP  : bid_id 하나의 병합 시도/완료/건너뜀(파일 미도착 등)
+# - MERGE_FAILED           : bid_id 하나의 병합 중 예외(배치 전체는 계속 진행)
+# - MERGE_TARGET_FUNNEL    : DB 대상 전체 → daily 인벤토리 매칭 → 상한 적용 후
+#   집계(#80, daily 전용 필터링 도입으로 각 단계 손실량을 추적하기 위해 추가)
+# - MERGE_NO_TARGETS       : DB 대상은 있었지만 daily 인벤토리에 하나도 안 걸려
+#   이번 회차에 처리할 게 없음(#80 — 예: 전부 백필 소관이거나 daily 파일 미도착)
+# - BATCH_SUMMARY          : 배치 1회 실행의 전체 집계(맨 마지막에 1번만)
 
 
 def log_merge_start(bid_id: str) -> None:
@@ -72,6 +76,17 @@ def log_merge_skip(bid_id: str, reason: str) -> None:
 
 def log_merge_failed(bid_id: str, reason: str) -> None:
     logger.error("MERGE_FAILED bid_id=%s reason=%s", bid_id, reason)
+
+
+def log_merge_target_funnel(db_total: int, daily_matched: int, after_cap: int) -> None:
+    logger.info(
+        "MERGE_TARGET_FUNNEL db_total=%d daily_matched=%d after_cap=%d",
+        db_total, daily_matched, after_cap,
+    )
+
+
+def log_merge_no_targets(db_total: int) -> None:
+    logger.info("MERGE_NO_TARGETS db_total=%d", db_total)
 
 
 def log_batch_summary(
