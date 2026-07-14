@@ -45,6 +45,7 @@ COPY pipeline/realtime/src/extractors/base.py ${LAMBDA_TASK_ROOT}/extractors/bas
 COPY pipeline/realtime/src/extractors/pdf.py ${LAMBDA_TASK_ROOT}/extractors/pdf.py
 COPY pipeline/realtime/src/extractors/hwp.py ${LAMBDA_TASK_ROOT}/extractors/hwp.py
 COPY pipeline/realtime/src/extractors/hwpx.py ${LAMBDA_TASK_ROOT}/extractors/hwpx.py
+COPY pipeline/realtime/src/extractors/router.py ${LAMBDA_TASK_ROOT}/extractors/router.py
 # handlers/: extract_pdf/hwp/hwpx만(extract_llm.py는 Dockerfile.llm 소관).
 COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
 COPY pipeline/realtime/src/handlers/extract_pdf.py ${LAMBDA_TASK_ROOT}/handlers/extract_pdf.py
