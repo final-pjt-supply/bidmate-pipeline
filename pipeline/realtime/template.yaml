@@ -833,7 +833,7 @@ Resources:
           MERGE_DB_USER: !Ref MergeDbUser
           MERGE_DB_PASSWORD: !Ref MergeDbPassword
           SOURCE_BUCKET: !Ref SourceBucketName
-          DRY_RUN: "true"   # 2026-07-14 #75 대응(required_certs 타입 정정 + rollback + 상한) 검증용 임시 전환. 검증 후 별도 승인으로 "false" 복귀 필요
+          DRY_RUN: "false"   # 2026-07-14 #75 대응(required_certs 타입 정정 + rollback + 상한) DRY_RUN 검증 완료(에러 0건, required_certs 정상 처리 확인) — 실전 전환
       EventInvokeConfig:
         MaximumRetryAttempts: 0
         DestinationConfig:
