@@ -17,6 +17,16 @@ pending/partial로 남아있어 자연스럽게 재시도된다.
 무의미한 실패 로그만 도배한다(사고 당일 실제로 겪은 증상). 처리 못 한 남은
 대상은 UPDATE 자체를 안 했으니 pending/partial 그대로이고, 다음 주기가 새
 커넥션으로 자연스럽게 다시 집는다.
+
+DB 대상 선정(db.fetch_merge_targets)은 여전히 pending/partial/failed 전부를
+뽑는다 — partial 재처리는 이 기존 조건이 그대로 담당하므로 여기서 따로 안
+바꾼다(#80 설계 결정). 대신 daily 인벤토리(merge.inventory, #80부터
+qualifications/daily/만 봄)에 실제로 파일이 있는 대상만 남긴 "다음"에 회당
+상한(200건)을 적용한다 — 순서를 이렇게 두는 이유는 #80에서 실측 확인된 문제
+때문이다: 예전엔 DB 대상(정렬 없음, 백필 포함 시 2만 건대)을 그대로 앞에서
+잘라 상한을 적용해서, 백필 소관 행이 정렬 없는 반환 순서상 상한을 전부
+점유하면 daily 대상이 순번 자체를 못 받는 구조였다. 인벤토리 필터를 먼저
+거치면 상한은 오직 "daily 파일이 실제로 있는" 대상 안에서만 적용된다.
 """
 import logging
 import time
@@ -26,8 +36,10 @@ from common.logs import (
     log_batch_summary,
     log_merge_done,
     log_merge_failed,
+    log_merge_no_targets,
     log_merge_skip,
     log_merge_start,
+    log_merge_target_funnel,
 )
 from merge import db, inventory
 from merge.logic import determine_qual_status, merge_qualification_documents
@@ -49,7 +61,19 @@ def lambda_handler(event, _context):
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
                 "conflict_bid_ids": [], "error_bid_ids": []}
 
+    db_total = len(targets)
+
     inv = inventory.build_inventory(config["source_bucket"])
+
+    # #80: 상한 적용보다 먼저 daily 인벤토리로 걸러낸다 — 그래야 백필 소관 대상이
+    # (daily 파일이 없어 여기서 이미 빠지므로) 상한 슬롯을 점유하지 못한다.
+    targets = [t for t in targets if t["bid_id"] in inv]
+    daily_matched = len(targets)
+
+    if daily_matched == 0:
+        log_merge_no_targets(db_total)
+        return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
+                "conflict_bid_ids": [], "error_bid_ids": []}
 
     max_targets = config["max_targets_per_run"]
     if len(targets) > max_targets:
@@ -58,6 +82,8 @@ def lambda_handler(event, _context):
             max_targets, len(targets) - max_targets,
         )
         targets = targets[:max_targets]
+
+    log_merge_target_funnel(db_total, daily_matched, len(targets))
 
     counts = {"merged": 0, "partial": 0, "failed": 0, "skipped": 0}
     conflict_bid_ids: list[str] = []
@@ -112,6 +138,11 @@ def _process_target(conn, target: dict, inv: dict, config: dict) -> tuple[str, b
     """대상 bid 하나를 병합한다. S3에서 찾은 파일이 0건이면 None을 반환해
     호출부가 skip으로 집계하게 한다 — 아직 아무 파일도 안 왔다는 뜻이라
     qual_status를 pending 그대로 두고 UPDATE 자체를 하지 않는다(2단계 설계).
+
+    #80부터 lambda_handler가 daily 인벤토리에 있는 대상만 걸러서 넘기므로
+    이 함수가 실제로 호출되는 시점엔 found_file_count가 0인 경우가 이론상
+    없어야 한다 — 그래도 방어적으로 남겨둔다(예: 인벤토리 구축과 처리 사이
+    S3 삭제 같은 경합 상황 대비).
     """
     bid_id = target["bid_id"]
     refs = inv.get(bid_id, [])

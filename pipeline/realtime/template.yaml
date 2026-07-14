@@ -158,6 +158,16 @@ Parameters:
       확인) 병합이 그보다 느리면 신선도 병목이 되므로 맞춤. LLM 추출 실측
       처리시간(76~180초/문서, expected_file_count 1~2건 기준)에도 여유 있음.
 
+  DryRun:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: >
+      병합 배치 실전 UPDATE 여부(#80, 하드코딩에서 파라미터로 전환). 실전
+      전환은 배포 시 DryRun=false 명시 전달로만 가능하다 — 기본값 true(안전).
+      `sam deploy --parameter-overrides DryRun=false`처럼 CLI로 명시해야만
+      실제 UPDATE가 실행된다.
+
 Resources:
   # ============================================================
   # SQS — 4쌍(본큐+DLQ), 전부 Standard 큐.
@@ -809,12 +819,9 @@ Resources:
   # ~28페이지) 약 10~15초 + 대상 10건 처리(건당 S3 GetObject+병합+DB 쿼리) 약
   # 30초 — 실측 예상 1분 이내지만 다른 Lambda들의 "실측의 5~10배 여유" 관례를
   # 따름. bid_table 대상 행이 수백 건으로 늘면 이 값과 배치 전략을 재검토할 것.
-  # DRY_RUN은 배포 시 넘기는 CloudFormation 파라미터가 아니라 아래 Environment에
-  # 직접 하드코딩된 값이다 — "false"로 실전 전환하려면 이 템플릿 자체를 고쳐야
-  # 한다(common/config.load_merge_db_config가 읽는 값). 현재 "true"(안전 기본값)로
-  # 되돌려뒀다 — 이 브랜치(#78, 콘텐츠 라우팅)를 sam deploy할 때 병합 배치가
-  # 의도치 않게 실전 UPDATE로 전환되는 걸 막기 위함. 병합 배치의 DRY_RUN=false
-  # 실전 전환은 별도 이슈에서 다시 다룬다.
+  # DRY_RUN은 #80부터 CloudFormation 파라미터(DryRun, 위 Parameters 참고)로
+  # 뺐다 — 실전 전환은 배포 시 DryRun=false 명시 전달로만 가능하다. 기본값은
+  # true(안전) — 파라미터를 안 넘기면 항상 dry-run으로 배포된다.
   # EventInvokeConfig: 이 배치는 handler 내부에서 bid_id별 실패를 이미 격리하므로
   # (merge_qualifications.py), 호출 전체가 실패하는 경우는 대부분 콜드스타트의
   # DB 연결/스키마 가드 같은 구조적 문제다 — 즉시 재시도해도 똑같이 실패할
@@ -843,7 +850,7 @@ Resources:
           MERGE_DB_USER: !Ref MergeDbUser
           MERGE_DB_PASSWORD: !Ref MergeDbPassword
           SOURCE_BUCKET: !Ref SourceBucketName
-          DRY_RUN: "true"   # 2026-07-14 #78 대응 — 이 브랜치(콘텐츠 라우팅) 배포가 병합 배치를 실전 전환시키지 않도록 안전 기본값으로 되돌림. 실전 전환(false)은 별도 이슈에서 다룸
+          DRY_RUN: !Ref DryRun   # #80 — 하드코딩에서 파라미터로 전환. 실전 전환은 배포 시 DryRun=false 명시 전달로만 가능. 기본값 true(안전)
       EventInvokeConfig:
         MaximumRetryAttempts: 0
         DestinationConfig:
