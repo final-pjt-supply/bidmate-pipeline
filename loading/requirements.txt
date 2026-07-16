@@ -1,2 +1,4 @@
 boto3>=1.40            # S3 sync/접근
 psycopg2-binary>=2.9   # bid_table(PostgreSQL) 적재. Bastion에서 로더 실행 시 필요
+opensearch-py>=2.6     # bid_chunks 색인(streaming_bulk)
+python-dotenv>=1.0     # .env 파싱(CLAUDE.md 환경변수 규칙)
