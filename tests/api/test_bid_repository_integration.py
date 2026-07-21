@@ -54,17 +54,20 @@ def session() -> Session:
     except OperationalError:
         pytest.skip("Postgres 미기동 — `cd db && docker compose up -d` 후 재실행")
 
-    if connection.execute(text("SELECT to_regclass('public.bid_table')")).scalar() is None:
-        connection.close()
-        pytest.skip("bid_table 없음 — db/schema 적용 필요(docker compose up이 초기화)")
-
+    # begin()을 먼저 연다 — execute()를 먼저 하면 SQLAlchemy가 트랜잭션을 자동
+    # 시작(autobegin)해 뒤이은 begin()이 충돌하고, 그 예외로 커넥션이 반환되지
+    # 않아 pool이 고갈된다. 테이블 존재 체크는 이 트랜잭션 안에서 한다.
     trans = connection.begin()
-    sess = Session(bind=connection)
     try:
-        yield sess
+        if connection.execute(text("SELECT to_regclass('public.bid_table')")).scalar() is None:
+            pytest.skip("bid_table 없음 — db/schema 적용 필요(docker compose up이 초기화)")
+        sess = Session(bind=connection)
+        try:
+            yield sess
+        finally:
+            sess.close()
     finally:
-        sess.close()
-        trans.rollback()   # 삽입 전부 되돌림
+        trans.rollback()   # 삽입 전부 되돌림(skip 경로 포함)
         connection.close()
 
 
