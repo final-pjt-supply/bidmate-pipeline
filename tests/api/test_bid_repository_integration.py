@@ -28,23 +28,28 @@ from app.config import get_settings
 from app.infra.db.repositories.bid_repository import BidRepository
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_PROD_DB_NAMES = {"bidmate"}   # 운영 RDS DB명(template.yaml). 쓰기 테스트 절대 금지.
 
 
 @pytest.fixture
 def session() -> Session:
     """트랜잭션 격리 세션. 붙을 수 없거나 bid_table이 없으면 skip.
 
-    ⚠ 이 테스트는 bid_table에 INSERT한다(끝에 롤백하지만). 공유/운영 RDS에 실수로
-    쓰기가 나가지 않도록, 대상 호스트가 로컬이 아니면 기본 차단하고
-    ALLOW_REMOTE_DB_TESTS=1로 명시 opt-in한 경우에만 실행한다. private RDS를 SSH
-    터널로 붙으면 POSTGRES_HOST가 localhost라 이 가드를 통과하는데(터널 로컬 끝점),
-    그때는 반드시 '테스트 전용 DB'를 향하게 하고 운영 DB로 돌리지 말 것.
+    ⚠ 이 테스트는 bid_table에 INSERT한다(끝에 롤백하지만). 운영 DB에 실수로 쓰기가
+    나가지 않도록 두 겹으로 막는다:
+      1) 대상 호스트가 로컬이 아니면 차단
+      2) 대상 DB명이 운영 DB(bidmate)면 차단 — SSH 터널은 RDS를 localhost:5433으로
+         보이게 해 host 검사를 통과하므로, DB명 검사가 실질 방어선이다.
+    정말 원격/운영을 향해 돌려야 하면(권장 안 함) ALLOW_REMOTE_DB_TESTS=1로 opt-in.
     """
     settings = get_settings()
-    if settings.postgres_host not in _LOCAL_HOSTS and os.environ.get("ALLOW_REMOTE_DB_TESTS") != "1":
+    opt_in = os.environ.get("ALLOW_REMOTE_DB_TESTS") == "1"
+    if not opt_in and settings.postgres_host not in _LOCAL_HOSTS:
+        pytest.skip(f"원격 DB({settings.postgres_host}) 쓰기 통합테스트 차단 — 로컬 docker 권장.")
+    if not opt_in and settings.postgres_db in _PROD_DB_NAMES:
         pytest.skip(
-            f"원격 DB({settings.postgres_host}) 쓰기 통합테스트 차단 — 로컬 docker 권장. "
-            "정말 원격(테스트 전용 DB)이면 ALLOW_REMOTE_DB_TESTS=1"
+            f"운영 DB({settings.postgres_db}) 쓰기 통합테스트 차단 — 로컬 docker 전용. "
+            "(SSH 터널이라 host는 localhost로 보여도 실제 대상은 운영 RDS)"
         )
 
     from app.infra.db.session import engine
