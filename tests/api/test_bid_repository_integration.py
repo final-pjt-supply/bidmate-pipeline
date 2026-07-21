@@ -165,6 +165,22 @@ def test_category_filter_and_paging(session):
     assert [r.bid_id for r in page2] == ["srv2_00"]
 
 
+def test_clse_after_excludes_expired_keeps_null(session):
+    _insert(session, bid_ntce_no="past", bid_clse_dt=datetime(2020, 1, 1))
+    _insert(session, bid_ntce_no="future", bid_clse_dt=datetime(2099, 1, 1))
+    _insert(session, bid_ntce_no="nodl", bid_clse_dt=None)
+    repo = BidRepository(session)
+    cutoff = datetime(2026, 7, 21, 12, 0)
+    rows = repo.list_page(
+        category=None, ntce_dt_from=None, ntce_dt_to=None,
+        clse_after=cutoff, limit=20, offset=0,
+    )
+    ids = {r.bid_id for r in rows}
+    assert "past_00" not in ids                 # 마감 지남 → 제외
+    assert ids == {"future_00", "nodl_00"}      # 미래 + NULL(마감없음) → 노출
+    assert repo.count(category=None, ntce_dt_from=None, ntce_dt_to=None, clse_after=cutoff) == 2
+
+
 def test_today_range_filter_on_ntce_dt(session):
     _insert(session, bid_ntce_no="in", bid_ntce_dt=datetime(2026, 7, 21, 9, 0))
     _insert(session, bid_ntce_no="yday", bid_ntce_dt=datetime(2026, 7, 20, 9, 0))

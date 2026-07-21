@@ -27,7 +27,8 @@ def make_bid(**overrides) -> Bid:
         dminstt_nm="성남시청",
         ntce_instt_nm="조달청 경기지방조달청",
         sucsfbid_mthd_nm="협상에 의한 계약",
-        bid_clse_dt=datetime(2026, 7, 26, 18, 0, 0),
+        # 기본은 확실한 미래(마감 필터 통과) — 벽시계에 의존하지 않게 멀리 둔다.
+        bid_clse_dt=datetime(2027, 1, 1, 18, 0, 0),
         bid_ntce_dt=datetime(2026, 7, 14, 10, 0, 0),
         bdgt_amt=819_000_000,
         bid_prtcpt_lmt_yn=True,
@@ -45,7 +46,7 @@ class FakeBidRepository:
         # 저장 시점에 merged 게이트를 적용 — repository 불변식(비-merged 미노출) 반영.
         self._rows = [r for r in rows if r.qual_status == "merged"]
 
-    def _filtered(self, category, ntce_dt_from, ntce_dt_to) -> list[Bid]:
+    def _filtered(self, category, ntce_dt_from, ntce_dt_to, clse_after) -> list[Bid]:
         out = self._rows
         if category is not None:
             out = [r for r in out if r.bid_category == category]
@@ -53,13 +54,16 @@ class FakeBidRepository:
             out = [r for r in out if r.bid_ntce_dt is not None and r.bid_ntce_dt >= ntce_dt_from]
         if ntce_dt_to is not None:
             out = [r for r in out if r.bid_ntce_dt is not None and r.bid_ntce_dt < ntce_dt_to]
+        # 마감 지난 것 제외, NULL은 남김(repository와 동일).
+        if clse_after is not None:
+            out = [r for r in out if r.bid_clse_dt is None or r.bid_clse_dt >= clse_after]
         return out
 
-    def count(self, *, category, ntce_dt_from, ntce_dt_to) -> int:
-        return len(self._filtered(category, ntce_dt_from, ntce_dt_to))
+    def count(self, *, category, ntce_dt_from, ntce_dt_to, clse_after=None) -> int:
+        return len(self._filtered(category, ntce_dt_from, ntce_dt_to, clse_after))
 
-    def list_page(self, *, category, ntce_dt_from, ntce_dt_to, limit, offset) -> list[Bid]:
-        rows = self._filtered(category, ntce_dt_from, ntce_dt_to)
+    def list_page(self, *, category, ntce_dt_from, ntce_dt_to, limit, offset, clse_after=None) -> list[Bid]:
+        rows = self._filtered(category, ntce_dt_from, ntce_dt_to, clse_after)
         # bid_clse_dt ASC NULLS LAST, then bid_id ASC (repository와 동일한 정렬).
         rows = sorted(
             rows,

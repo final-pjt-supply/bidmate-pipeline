@@ -44,9 +44,15 @@ class BidService:
 
         ntce_from, ntce_to = self._today_range() if today else (None, None)
         category_value = category.value if category is not None else None
+        # 추천 페이지는 마감 지난 공고를 노출하지 않는다(결정 E, 2026-07-21 확정).
+        # 마감 없는(NULL) 공고는 남긴다(repository._apply_filters 참조).
+        now_kst = datetime.now(_KST).replace(tzinfo=None)
 
         total = self._repo.count(
-            category=category_value, ntce_dt_from=ntce_from, ntce_dt_to=ntce_to
+            category=category_value,
+            ntce_dt_from=ntce_from,
+            ntce_dt_to=ntce_to,
+            clse_after=now_kst,
         )
         offset = (page - 1) * PAGE_SIZE
         rows = self._repo.list_page(
@@ -55,6 +61,7 @@ class BidService:
             ntce_dt_to=ntce_to,
             limit=PAGE_SIZE,
             offset=offset,
+            clse_after=now_kst,
         )
         # 범위 밖 page는 rows=[]가 자연스럽게 나온다(200 + 빈 배열, 에러 아님).
         items = [BidListItem.model_validate(r) for r in rows]

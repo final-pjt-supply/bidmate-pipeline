@@ -8,7 +8,7 @@ pending/partial/failed를 흘리면 안 되는 건 도메인 불변식이라, �
 """
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.domain.enums import QualStatus
@@ -31,10 +31,11 @@ class BidRepository:
         category: str | None,
         ntce_dt_from: datetime | None,
         ntce_dt_to: datetime | None,
+        clse_after: datetime | None = None,
     ) -> int:
         """필터 적용 후 총 건수(응답 total)."""
         stmt = select(func.count()).select_from(Bid).where(Bid.qual_status == _MERGED)
-        stmt = self._apply_filters(stmt, category, ntce_dt_from, ntce_dt_to)
+        stmt = self._apply_filters(stmt, category, ntce_dt_from, ntce_dt_to, clse_after)
         return self._session.execute(stmt).scalar_one()
 
     def list_page(
@@ -45,6 +46,7 @@ class BidRepository:
         ntce_dt_to: datetime | None,
         limit: int,
         offset: int,
+        clse_after: datetime | None = None,
     ) -> list[Bid]:
         """마감 임박순(deadline) 한 페이지.
 
@@ -57,7 +59,7 @@ class BidRepository:
         #   list_page_by_score(company_id, ...)로 추가하고, service가 분기한다.
         """
         stmt = self._merged_base()
-        stmt = self._apply_filters(stmt, category, ntce_dt_from, ntce_dt_to)
+        stmt = self._apply_filters(stmt, category, ntce_dt_from, ntce_dt_to, clse_after)
         stmt = (
             stmt.order_by(Bid.bid_clse_dt.asc().nulls_last(), Bid.bid_id.asc())
             .limit(limit)
@@ -71,7 +73,7 @@ class BidRepository:
         return self._session.execute(stmt).scalar_one_or_none()
 
     @staticmethod
-    def _apply_filters(stmt, category, ntce_dt_from, ntce_dt_to):
+    def _apply_filters(stmt, category, ntce_dt_from, ntce_dt_to, clse_after=None):
         if category is not None:
             stmt = stmt.where(Bid.bid_category == category)
         # today: 공고게시일(bid_ntce_dt) 기준 KST 오늘 [from, to) 반개구간.
@@ -79,4 +81,8 @@ class BidRepository:
             stmt = stmt.where(Bid.bid_ntce_dt >= ntce_dt_from)
         if ntce_dt_to is not None:
             stmt = stmt.where(Bid.bid_ntce_dt < ntce_dt_to)
+        # 마감 지난 공고 제외(추천 페이지). 마감일이 없는(NULL) 공고는 "아직 안 닫힘"
+        # 으로 보고 남긴다 — 날짜 미상이라고 숨기지 않는다.
+        if clse_after is not None:
+            stmt = stmt.where(or_(Bid.bid_clse_dt >= clse_after, Bid.bid_clse_dt.is_(None)))
         return stmt

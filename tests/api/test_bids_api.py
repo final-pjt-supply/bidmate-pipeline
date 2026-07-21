@@ -22,7 +22,7 @@ def test_list_returns_spec_shape_and_null_match_score(client_with_rows):
         "bid_prtcpt_lmt_yn", "match_score",
     }
     assert item["match_score"] is None
-    assert item["bid_clse_dt"] == "2026-07-26T18:00:00"   # KST naive, 타임존 접미사 없음
+    assert item["bid_clse_dt"] == "2027-01-01T18:00:00"   # KST naive, 타임존 접미사 없음
 
 
 def test_list_excludes_non_merged(client_with_rows):
@@ -63,9 +63,9 @@ def test_empty_and_out_of_range_page_is_200_empty(client_with_rows):
 
 def test_deadline_sort_puts_nulls_last(client_with_rows):
     rows = [
-        make_bid(bid_id="late_00", bid_ntce_no="late", bid_clse_dt=datetime(2026, 8, 1)),
+        make_bid(bid_id="late_00", bid_ntce_no="late", bid_clse_dt=datetime(2027, 8, 1)),
         make_bid(bid_id="none_00", bid_ntce_no="none", bid_clse_dt=None),
-        make_bid(bid_id="soon_00", bid_ntce_no="soon", bid_clse_dt=datetime(2026, 7, 22)),
+        make_bid(bid_id="soon_00", bid_ntce_no="soon", bid_clse_dt=datetime(2027, 7, 22)),
     ]
     body = client_with_rows(rows).get("/bids").json()
     assert [i["bid_id"] for i in body["items"]] == ["soon_00", "late_00", "none_00"]
@@ -73,11 +73,24 @@ def test_deadline_sort_puts_nulls_last(client_with_rows):
 
 def test_score_sort_falls_back_to_deadline(client_with_rows):
     rows = [
-        make_bid(bid_id="late_00", bid_ntce_no="late", bid_clse_dt=datetime(2026, 8, 1)),
-        make_bid(bid_id="soon_00", bid_ntce_no="soon", bid_clse_dt=datetime(2026, 7, 22)),
+        make_bid(bid_id="late_00", bid_ntce_no="late", bid_clse_dt=datetime(2027, 8, 1)),
+        make_bid(bid_id="soon_00", bid_ntce_no="soon", bid_clse_dt=datetime(2027, 7, 22)),
     ]
     by_score = client_with_rows(rows).get("/bids", params={"sort": "score"}).json()
     assert [i["bid_id"] for i in by_score["items"]] == ["soon_00", "late_00"]
+
+
+def test_list_excludes_expired_but_keeps_null_deadline(client_with_rows):
+    rows = [
+        make_bid(bid_id="past_00", bid_ntce_no="past", bid_clse_dt=datetime(2020, 1, 1)),
+        make_bid(bid_id="future_00", bid_ntce_no="future", bid_clse_dt=datetime(2027, 1, 1)),
+        make_bid(bid_id="nodl_00", bid_ntce_no="nodl", bid_clse_dt=None),
+    ]
+    body = client_with_rows(rows).get("/bids").json()
+    ids = {i["bid_id"] for i in body["items"]}
+    assert "past_00" not in ids          # 마감 지난 공고는 제외
+    assert ids == {"future_00", "nodl_00"}   # 미래 + 마감없음(NULL)은 노출
+    assert body["total"] == 2
 
 
 def test_detail_returns_assembled_qualification(client_with_rows):
