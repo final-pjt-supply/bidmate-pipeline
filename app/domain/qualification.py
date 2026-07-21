@@ -12,10 +12,18 @@ qual_status='merged'는 "첨부를 다 처리했다"는 뜻이지 "자격 18필�
 포맷(total/page 등)은 여기가 아니라 api/v1/schemas에 둔다.
 """
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PlainSerializer
 
 from app.domain.enums import AwardCutlineType, CompanySizeLimit, RegionLimitType
+
+# Pydantic v2는 Decimal을 JSON '문자열'("85.000")로 직렬화한다 — 프론트 명세는
+# 숫자(85)라 타입이 어긋난다. 값은 그대로 두고(가공 X, 정밀도 손실 없음) JSON
+# 출력 타입만 숫자로 바꾼다. when_used='json'이라 model_dump()는 Decimal 유지.
+DecimalAsNumber = Annotated[
+    Decimal, PlainSerializer(float, return_type=float, when_used="json")
+]
 
 
 class _JsonbItem(BaseModel):
@@ -69,9 +77,9 @@ class Qualification(BaseModel):
     credit_rating_req: bool | None = None
     joint_venture_allowed: bool | None = None
     subcontract_allowed: bool | None = None
-    # NUMERIC 컬럼 → psycopg가 Decimal로 반환. float 변환은 값을 바꾸는 '가공'이라
-    # 하지 않는다(가공은 프론트 담당). JSON 직렬화 시 숫자로 나간다.
-    tech_weight: Decimal | None = None
-    price_weight: Decimal | None = None
+    # NUMERIC 컬럼 → psycopg가 Decimal로 반환. 내부는 Decimal 유지, JSON 출력만
+    # 숫자(프론트 명세 타입)로 직렬화한다(DecimalAsNumber).
+    tech_weight: DecimalAsNumber | None = None
+    price_weight: DecimalAsNumber | None = None
     award_cutline_type: AwardCutlineType | None = None
-    award_cutline_value: Decimal | None = None
+    award_cutline_value: DecimalAsNumber | None = None

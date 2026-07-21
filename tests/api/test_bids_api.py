@@ -100,6 +100,11 @@ def test_detail_returns_assembled_qualification(client_with_rows):
     assert q["required_licenses"][0]["code"] == "SW01"
     assert q["required_certs"] == ["ISO 27001", "GS인증"]
     assert q["award_cutline_type"] == "score"
+    # NUMERIC은 JSON 숫자로 나가야 한다(Decimal→문자열 방지, 프론트 명세 타입).
+    assert q["tech_weight"] == 80 and isinstance(q["tech_weight"], (int, float))
+    assert q["price_weight"] == 20 and isinstance(q["price_weight"], (int, float))
+    assert isinstance(q["award_cutline_value"], (int, float))
+    assert not isinstance(q["award_cutline_value"], str)
     # DB엔 있으나 명세 15필드 밖인 필드는 응답에 없어야 한다.
     assert "item_codes" not in q
     assert "capacity_reqs" not in q
