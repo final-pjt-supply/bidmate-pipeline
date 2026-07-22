@@ -177,6 +177,59 @@ def _shre_rate_list(record):
     return [token.strip() for token in SHRE_RATE_SPLIT.split(text) if token.strip()]
 
 
+# expected_file_count 전용 dedup 판정 규칙. attachment_rules.py의 DOC_EXT_PRIORITY와
+# 반드시 동일하게 유지할 것 — 값을 바꾸면 두 곳 다 바꿔야 한다(#88, 순환 임포트
+# 회피 때문에 import 대신 로직을 복제함. attachment_rules.py가 이미
+# `from schema import parse_dt`로 이 모듈을 참조하고 있어 반대 방향 import는 순환이 됨).
+_DOC_EXT_PRIORITY = ("hwpx", "hwp", "pdf")
+
+
+def _split_ext(file_name):
+    """attachment_rules.split_ext()와 동일 규칙(#88) — snake_case(file_nm) 입력용."""
+    name = str(file_name or "").strip()
+    if "." in name:
+        stem, ext = name.rsplit(".", 1)
+        return stem.strip(), ext.strip().lower()
+    return name, ""
+
+
+def _effective_expected_count(attachments):
+    """expected_file_count 계산 전용(#88). attachment_rules.apply_dedup()과 동일한 두 규칙
+    (동일 URL 중복 제거, 같은 stem은 hwpx>hwp>pdf 우선순위 하나만)을 재현하되, 여기에 더해
+    지원 확장자(pdf/hwp/hwpx)가 아닌 첨부는 아예 세지 않는다 — 추출 파이프라인이 원천적으로
+    처리 못 하는 파일(zip/xlsx/htm 등)까지 "기대 문서 수"에 잡혀 병합 판정이 영원히
+    partial/pending에 고착되는 문제(#88) 대응. attachments 리스트 자체는 이 함수가 건드리지
+    않는다 — 다운로드 파이프라인(attachment_rules.build_file_metadata) 입력은 그대로 둔다.
+    """
+    best = {}
+    for attachment in attachments:
+        stem, ext = _split_ext(attachment.get("file_nm"))
+        if stem and ext in _DOC_EXT_PRIORITY:
+            pri = _DOC_EXT_PRIORITY.index(ext)
+            best[stem] = min(best.get(stem, pri), pri)
+
+    count = 0
+    seen_urls = set()
+    for attachment in attachments:
+        url = str(attachment.get("file_url") or "").strip()
+        if url and url in seen_urls:
+            continue
+
+        stem, ext = _split_ext(attachment.get("file_nm"))
+        if stem and ext in _DOC_EXT_PRIORITY and _DOC_EXT_PRIORITY.index(ext) > best[stem]:
+            continue
+
+        if ext not in _DOC_EXT_PRIORITY:
+            if url:
+                seen_urls.add(url)
+            continue
+
+        if url:
+            seen_urls.add(url)
+        count += 1
+    return count
+
+
 def _attachments(record):
     attachments = []
     spec_urls = set()
@@ -265,6 +318,6 @@ def to_curated(record, bid_category, raw_s3_key=None):
         "unty_ntce_no": mapped["unty_ntce_no"],
         # 첨부·메타
         "attachments": attachments,
-        "expected_file_count": len(attachments),
+        "expected_file_count": _effective_expected_count(attachments),
         "raw_s3_key": raw_s3_key,
     }
