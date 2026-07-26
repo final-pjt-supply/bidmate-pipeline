@@ -17,6 +17,8 @@ import json
 import logging
 import time
 
+from botocore.exceptions import ClientError
+
 from common import paths, s3, sqs
 from common.config import load_embedding_config
 from common.logs import log_process_done, log_process_start
@@ -32,6 +34,7 @@ logging.getLogger().setLevel(logging.INFO)
 # 때만 올린다 — OpenSearch 문서의 embedding_version 필드로 저장돼 재인덱싱
 # 필요 여부를 판단하는 기준이 된다.
 EMBEDDING_VERSION = "v1"
+TITLE_DOCUMENT_ID = "title"
 
 
 def lambda_handler(event, _context):
@@ -53,12 +56,27 @@ def _process(bucket: str, key: str) -> None:
         text = "\n\n".join(p["text"] for p in pages)
 
         chunks = chunker.chunk(text, source=file_id)
-        if not chunks:
+        title = _load_bid_title(bucket, key, bid_id)
+        embedding_inputs = list(chunks)
+        if title:
+            # 제목은 첨부파일마다 같은 고정 file_id/document_id를 사용한다.
+            # 첨부가 여러 개여도 인덱싱 Lambda의 기존 _id 규칙
+            # (file_id::chunk_idx)이 같은 문서를 덮어써 중복이 쌓이지 않는다.
+            embedding_inputs.append(
+                {
+                    "chunk_idx": 0,
+                    "type": "title",
+                    "text": title,
+                    "_title": True,
+                }
+            )
+
+        if not embedding_inputs:
             # 짧거나 언어적 내용이 없는 문서는 전량 드랍될 수 있다(chunker.py의
-            # _merge_short_chunks 참고) — 실패가 아니라 정상적인 빈 결과이므로
-            # 예외 없이 스킵.
+            # _merge_short_chunks 참고). 제목도 찾지 못한 경우에만 정상적으로 스킵.
             logger.warning(
-                "청킹 결과 0건 — 임베딩/저장 건너뜀: bid_id=%s document_id=%s key=%s",
+                "임베딩 대상 0건(본문 청크·제목 모두 없음) — 저장 건너뜀: "
+                "bid_id=%s document_id=%s key=%s",
                 bid_id, document_id, key,
             )
             log_process_done(bid_id, document_id, int((time.monotonic() - start) * 1000), "-")
@@ -66,7 +84,7 @@ def _process(bucket: str, key: str) -> None:
 
         config = load_embedding_config()
         embedded = cloudflare_embedder.embed(
-            chunks,
+            embedding_inputs,
             account_id=config["cloudflare_account_id"],
             api_token=config["cloudflare_api_token"],
         )
@@ -78,9 +96,9 @@ def _process(bucket: str, key: str) -> None:
         # OpenSearch 문서만 보고도 바로 조회/필터링할 수 있게 중복 저장한다).
         result_chunks = [
             {
-                "file_id": file_id,
+                "file_id": f"{bid_id}_title" if c.get("_title") else file_id,
                 "bid_id": bid_id,
-                "document_id": document_id,
+                "document_id": TITLE_DOCUMENT_ID if c.get("_title") else document_id,
                 "chunk_idx": c["chunk_idx"],
                 "type": c["type"],
                 "text": c["text"],
@@ -125,3 +143,44 @@ def _send_to_index_queue(bucket: str, vectors_key: str, index_queue_url: str | N
         )
         return
     sqs.send_to_queue(index_queue_url, {"bucket": bucket, "key": vectors_key})
+
+
+def _load_bid_title(bucket: str, extracted_key: str, bid_id: str) -> str | None:
+    """같은 수집 파티션의 curated 공고 JSON에서 제목을 읽는다.
+
+    제목 메타데이터가 아직 없거나 비어 있어도 기존 본문 임베딩은 계속 진행한다.
+    반면 AccessDenied 같은 권한/구조 오류는 배포 결함이므로 삼키지 않고 실패시킨다.
+    """
+    curated_key = paths.extracted_key_to_curated_bid_key(extracted_key)
+    try:
+        body = json.loads(s3.get_object(bucket, curated_key))
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code")
+        if code in ("404", "NoSuchKey", "NotFound"):
+            logger.warning(
+                "curated 공고 메타데이터 없음 — 제목 임베딩만 건너뜀: "
+                "bid_id=%s key=%s",
+                bid_id,
+                curated_key,
+            )
+            return None
+        raise
+
+    if body.get("bid_id") != bid_id:
+        logger.warning(
+            "curated bid_id 불일치 — 제목 임베딩만 건너뜀: expected=%s actual=%s key=%s",
+            bid_id,
+            body.get("bid_id"),
+            curated_key,
+        )
+        return None
+
+    title = body.get("bid_ntce_nm")
+    if not isinstance(title, str) or not title.strip():
+        logger.warning(
+            "curated 공고 제목 없음 — 제목 임베딩만 건너뜀: bid_id=%s key=%s",
+            bid_id,
+            curated_key,
+        )
+        return None
+    return title.strip()

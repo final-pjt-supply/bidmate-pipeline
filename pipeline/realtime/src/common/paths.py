@@ -27,6 +27,7 @@ import re
 EXTRACTED_PREFIX = "extracted"
 QUALIFICATIONS_PREFIX = "qualifications"
 VECTORS_PREFIX = "vectors"  # 임베딩 산출물(청크+벡터). qualifications와 형제 관계(#64)
+CURATED_PREFIX = "raw/curated"
 
 _RAW_KEY_RE = re.compile(
     r"^raw/downloads/(?P<stage>[^/]+)"
@@ -71,6 +72,33 @@ def parse_extracted_key(key: str) -> dict:
     if m is None:
         raise ValueError(f"{EXTRACTED_PREFIX} key 형식이 아님: {key}")
     return m.groupdict()
+
+
+def extracted_key_to_curated_bid_key(key: str) -> str:
+    """extracted 첨부파일 key에서 같은 수집 회차의 공고 메타데이터 key를 만든다.
+
+    첨부파일 파생물은 ``.../{bid_id}/{file_id}.json`` 구조이고, curated 공고
+    메타데이터는 같은 stage/biz_div/시각 파티션 바로 아래에
+    ``{bid_ntce_no}-{bid_ntce_ord}.json``으로 저장된다.
+
+    예:
+      extracted/.../R26BK01620154_000/R26BK01620154_000_doc01.json
+      -> raw/curated/.../R26BK01620154-000.json
+    """
+    parts = parse_extracted_key(key)
+    bid_ntce_no, sep, bid_ntce_ord = parts["bid_id"].rpartition("_")
+    if not sep or not bid_ntce_no or not bid_ntce_ord:
+        raise ValueError(f"bid_id에서 공고번호/차수를 분리할 수 없음: {parts['bid_id']}")
+    return (
+        "{prefix}/{stage}/biz_div={biz_div}"
+        "/year={year}/month={month}/day={day}/hour={hour}"
+        "/{bid_ntce_no}-{bid_ntce_ord}.json"
+    ).format(
+        prefix=CURATED_PREFIX,
+        bid_ntce_no=bid_ntce_no,
+        bid_ntce_ord=bid_ntce_ord,
+        **parts,
+    )
 
 
 def extracted_key_to_qualifications_key(key: str) -> str:
