@@ -460,6 +460,10 @@ Resources:
                 Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "arn:aws:s3:::${SourceBucketName}/extracted/*"
+              - Sid: ReadCuratedBidMetadata
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/raw/curated/*"
               - Sid: WriteVectors
                 Effect: Allow
                 Action: s3:PutObject

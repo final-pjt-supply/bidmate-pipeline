@@ -68,6 +68,23 @@ def test_parse_extracted_key_roundtrip():
     assert parts["hour"] == "17"
 
 
+def test_extracted_key_to_curated_bid_key():
+    extracted_key = paths.raw_key_to_extracted_key(REAL_RAW_KEY)
+    assert paths.extracted_key_to_curated_bid_key(extracted_key) == (
+        "raw/curated/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
+        "/R26BK01620154-000.json"
+    )
+
+
+def test_extracted_key_to_curated_bid_key_rejects_malformed_bid_id():
+    malformed = (
+        "extracted/daily/biz_div=servc/year=2026/month=07/day=07/hour=17"
+        "/malformed/malformed_doc01.json"
+    )
+    with pytest.raises(ValueError, match="분리할 수 없음"):
+        paths.extracted_key_to_curated_bid_key(malformed)
+
+
 def test_document_id_from_file_id():
     assert paths.document_id_from_file_id("R26BK01620154_000", "R26BK01620154_000_doc01") == "doc01"
 
