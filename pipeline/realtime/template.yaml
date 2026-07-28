@@ -35,7 +35,7 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >
-      Cloudflare 계정 ID(Workers AI BGE-M3 임베딩용, #64). NvidiaApiKey와 동일하게
+      Cloudflare 계정 ID(Workers AI BGE-M3 임베딩용, #64). LlmApiKey와 동일하게
       `sam deploy --parameter-overrides CloudflareAccountId=<실제값>`처럼 CLI로
       직접 넘길 것 — samconfig.toml은 git에 커밋되므로 여기 Default에 넣지 않는다.
 
@@ -52,24 +52,37 @@ Parameters:
     Default: bidmate
     Description: raw/extracted/qualifications가 있는 S3 버킷. 다른 팀원 소유, 원본(raw)은 읽기전용.
 
-  NvidiaApiKey:
+  # 2026-07-27 NVIDIA Build가 qwen/qwen3-next-80b-a3b-instruct를 EOL 처리해(HTTP 410)
+  # LLM 추출이 100% 실패했다. 같은 모델이 Bedrock(us-east-1)에 qwen.qwen3-next-80b-a3b로
+  # 있고 backfill이 이미 30일간 27,380건/오류 0.66%로 쓰고 있어 그쪽으로 옮긴다.
+  # Bedrock은 OpenAI 호환 엔드포인트(/openai/v1)를 제공하므로 client.py는 그대로 두고
+  # 파라미터만 교체한다 — 이미지 재빌드 불필요.
+  LlmApiKey:
     Type: String
     NoEcho: true
     Default: ""
     Description: >
-      NVIDIA Build API 키. 실제 값은 여기 Default에 넣지 말고 배포 시
-      `sam deploy --parameter-overrides NvidiaApiKey=<실제키>`처럼 CLI로 직접 넘길 것
+      LLM API 키. 현재는 Bedrock API 키(backfill의 AWS_BEARER_TOKEN_BEDROCK와 같은 것).
+      실제 값은 여기 Default에 넣지 말고 배포 시
+      `sam deploy --parameter-overrides LlmApiKey=<실제키>`처럼 CLI로 직접 넘길 것
       (samconfig.toml은 git에 커밋되므로 여기에 실제 키를 적으면 히스토리에 평문으로 남는다).
+      OpenAI SDK는 SigV4를 못 해서 Bearer 토큰이 필요하다. boto3 Converse로 옮기면
+      (backfill/src/backfill/llm_bedrock.py 참고) IAM Role로 붙어 이 키 자체가 없어진다.
 
   LlmBaseUrl:
     Type: String
-    Default: "https://integrate.api.nvidia.com/v1"
-    Description: LLM API base_url. 다른 OpenAI 호환 API로 교체할 경우만 바꾸면 됨.
+    Default: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"
+    Description: >
+      LLM API base_url. 다른 OpenAI 호환 API로 교체할 경우만 바꾸면 됨.
+      Bedrock은 경로가 반드시 /openai/v1 이어야 한다 — /v1 은 200을 주지만 응답
+      스키마가 달라 choices가 없다(2026-07-28 실측).
 
   LlmModel:
     Type: String
-    Default: "qwen/qwen3-next-80b-a3b-instruct"
-    Description: LLM 모델 이름.
+    Default: "qwen.qwen3-next-80b-a3b"
+    Description: >
+      LLM 모델 이름. Bedrock 표기는 슬래시가 아니라 점을 쓴다.
+      us-east-1 전용 — ap-northeast-2에는 Qwen 계열이 없다.
 
   AlertEmail:
     Type: String
@@ -100,7 +113,7 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >
-      OpenSearch basic auth user. NvidiaApiKey와 동일하게
+      OpenSearch basic auth user. LlmApiKey와 동일하게
       `sam deploy --parameter-overrides OpenSearchUser=<실제값>`처럼 CLI로 전달할 것.
 
   OpenSearchPassword:
@@ -147,7 +160,7 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: >
-      RDS 접속 비밀번호. NvidiaApiKey와 동일한 관례 — samconfig.toml(git 커밋됨)에
+      RDS 접속 비밀번호. LlmApiKey와 동일한 관례 — samconfig.toml(git 커밋됨)에
       절대 넣지 말고 `sam deploy --parameter-overrides MergeDbPassword=<실제값>`로만 전달.
 
   MergeScheduleRate:
@@ -712,6 +725,12 @@ Resources:
   # 문제였지 RPM 누적 총량이 문제가 아니었음). 동시 실행 상한을 더 좁혀
   # redrive 시 유량 자체를 제한한다.
   #
+  # 2026-07-28 Bedrock 전환 후 주의: 위 3이라는 값의 근거였던 "NVIDIA Build의 40 RPM
+  # 한도"와 "NVIDIA 동시 호출 버스트 거절"은 더 이상 적용되지 않는다. Bedrock은
+  # 자체 쿼터 체계라 상한을 올릴 여지가 있으나, 실측 없이 한 번에 풀지 말고
+  # 3 → 10 정도로 올려 Throttles 지표를 관찰한 뒤 결정할 것. DLQ 240건 redrive는
+  # 상향 전에 현재 값(3)으로 먼저 흘려보내는 편이 안전하다.
+  #
   # Timeout=900s(15분, AWS Lambda 허용 최대치): 기존 180s → 600s → 900s로 상향.
   # 실제 요청 단위 컷오프는 extractors/llm/client.py의 OpenAI 클라이언트
   # timeout(600s, 10분)이 먼저 걸린다 — 정상이지만 느린 완료(실측 76~180초대,
@@ -731,7 +750,10 @@ Resources:
       ReservedConcurrentExecutions: 3
       Environment:
         Variables:
-          NVIDIA_API_KEY: !Ref NvidiaApiKey
+          # 환경변수 이름은 NVIDIA_API_KEY 그대로 둔다 — common/config.py가 이 이름으로
+          # 읽으므로 바꾸려면 코드 수정 + 이미지 재빌드가 필요하다. Converse 전환 시
+          # 함께 정리한다(그때는 키 자체가 없어진다).
+          NVIDIA_API_KEY: !Ref LlmApiKey
           LLM_BASE_URL: !Ref LlmBaseUrl
           LLM_MODEL: !Ref LlmModel
       Events:
