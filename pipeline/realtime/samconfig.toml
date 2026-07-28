@@ -6,10 +6,14 @@ resolve_s3 = true
 s3_prefix = "realtime-dev"
 confirm_changeset = true
 capabilities = "CAPABILITY_NAMED_IAM"
-# NvidiaApiKey/CloudflareAccountId/CloudflareApiToken은 여기 넣지 않는다(이 파일은
-# git에 커밋됨) — 배포 시 `sam deploy --parameter-overrides NvidiaApiKey=<실제키>
+# LlmApiKey/CloudflareAccountId/CloudflareApiToken은 여기 넣지 않는다(이 파일은
+# git에 커밋됨) — 배포 시 `sam deploy --parameter-overrides LlmApiKey=<실제키>
 # CloudflareAccountId=<실제값> CloudflareApiToken=<실제값>`처럼 CLI로 별도로 넘길 것.
-parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor:latest\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm:latest\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding:latest\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://integrate.api.nvidia.com/v1\" LlmModel=\"qwen/qwen3-next-80b-a3b-instruct\""
+#
+# 2026-07-28: 파라미터 이름이 NvidiaApiKey → LlmApiKey로 바뀌었다. 예전 이름으로
+# 넘기면 sam이 "unknown parameter" 오류를 내므로 조용히 실패하지는 않는다.
+# 값에는 NVIDIA 키가 아니라 Bedrock API 키를 넣어야 한다.
+parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor:latest\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm:latest\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding:latest\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\""
 image_repositories = []
 
 [default.global.parameters]
