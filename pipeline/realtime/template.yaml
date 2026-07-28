@@ -12,23 +12,41 @@ Description: >
   스크립트(scripts/setup-s3-events.ps1)로 설정한다(이 배포엔 포함 안 함).
 
 Parameters:
+  # 2026-07-28: 아래 세 이미지 파라미터를 :latest → digest 고정으로 바꾼다.
+  # MergeImageUri 주석에 이미 적혀 있던 원칙(":latest 금지")을 나머지에도 적용하는 것.
+  #
+  # 계기: :latest 태그가 각각 7/09, 7/11에 멈춰 있는데 실제 운영 함수는 그보다
+  # 나중 이미지로 돌고 있었다. 그 상태로 sam deploy를 하면 함수 4개가 조용히
+  # 옛 코드로 롤백된다(추출 3개 7/14→7/09, 임베딩 7/26→7/11). 실제로 changeset을
+  # 미리 만들어 확인했고, 실행하지 않고 아래 값으로 정정했다.
+  #
+  # 새 이미지를 푸시할 때마다 이 Default와 samconfig.toml의 값을 함께 갱신할 것.
+  # 태그만 옮기고 여기를 안 고치면 같은 사고가 반복된다.
   ExtractorImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor:latest
-    Description: pdf/hwp/hwpx 추출 Lambda 3개가 공유하는 이미지(ECR). CMD만 함수별로 다르게 오버라이드.
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:a7c2f96ccfc335b0f8c337c542ca3bfae6b70e046f61e6cd9039d053b1d0769e
+    Description: >
+      pdf/hwp/hwpx 추출 Lambda 3개가 공유하는 이미지(ECR). CMD만 함수별로 다르게 오버라이드.
+      현재 digest는 2026-07-14 푸시분(태그 78) — 배포 중인 값과 동일.
 
   LlmImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm:latest
-    Description: LLM 자격요건 추출 Lambda 전용 이미지(ECR). CMD가 이미지에 이미 내장돼 있어 오버라이드 안 함.
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3
+    Description: >
+      LLM 자격요건 추출 Lambda 전용 이미지(ECR). CMD가 이미지에 이미 내장돼 있어 오버라이드 안 함.
+      현재 digest는 2026-07-09 푸시분 — 기존 :latest가 가리키던 것과 동일해 동작 변화 없음.
 
   EmbeddingImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding:latest
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849
     Description: >
-      임베딩 Lambda 이미지(ECR, #64). 인덱싱 Lambda(후속)도 이 이미지를 공유할
-      예정 — pdf/hwp/hwpx가 ExtractorImageUri를 공유하는 것과 동일 패턴으로
-      CMD만 함수별로 다르게 오버라이드.
+      임베딩 Lambda 이미지(ECR, #64). 인덱싱 Lambda도 이 이미지를 공유한다 —
+      pdf/hwp/hwpx가 ExtractorImageUri를 공유하는 것과 동일 패턴으로 CMD만 함수별로
+      다르게 오버라이드. 현재 digest는 2026-07-26 푸시분(#92 제목 벡터 파이프라인,
+      커밋 3328983) — realtime-embed-dev가 실제로 돌리고 있던 이미지다.
+      이 배포로 realtime-index-dev도 같은 이미지로 올라가지만, #92 변경은
+      handlers/embed_chunks.py와 common/paths.py 순수 추가(28줄, 삭제 0)뿐이고
+      색인이 쓰는 paths.document_id_from_file_id는 그대로라 동작이 바뀌지 않는다.
 
   CloudflareAccountId:
     Type: String
