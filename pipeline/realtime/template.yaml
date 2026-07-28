@@ -766,6 +766,17 @@ Resources:
           Properties:
             Queue: !GetAtt RealtimeLlmExtractQueue.Arn
             BatchSize: 1
+            # 2026-07-28 추가. ReservedConcurrentExecutions만 걸면 SQS 폴러는 그 상한을
+            # 모른 채 계속 메시지를 끌어와 호출을 시도하고, 넘치는 만큼 Throttle된다.
+            # 실측: 7/20 하루 Throttle 1,587건(같은 날 실제 호출 284건의 5배 이상),
+            # 7/28 DLQ 269건 redrive 중 720건(실제 호출 323건). 처리 자체는 재시도로
+            # 흡수됐지만 불필요한 지연이 발생했다.
+            #
+            # 폴러 쪽 상한을 예약 동시성과 같은 값으로 맞춰 과다 폴링 자체를 막는다.
+            # 이 값은 ReservedConcurrentExecutions와 함께 움직여야 한다 — 한쪽만
+            # 올리면 다시 어긋난다. (허용 최소값은 2)
+            ScalingConfig:
+              MaximumConcurrency: 3
 
   # 이 함수는 VPC 밖에 남는다(Cloudflare 외부 API 호출 때문 — VPC 안에 넣으면
   # 인터넷이 막힘). INDEX_QUEUE_URL은 2026-07-11 인덱싱 Lambda 배포 시점에
