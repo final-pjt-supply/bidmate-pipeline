@@ -160,3 +160,76 @@ def _to_db_value(value):
     if isinstance(value, (list, dict)):
         return psycopg2.extras.Json(value)
     return value
+
+
+# --- 품목 태그(#97) --------------------------------------------------------
+# bid_table은 건드리지 않고 bid_tags에 따로 쌓는다. 이 테이블은 파이프라인 팀
+# 소유이고 매칭 로직이 어떤 컬럼을 참조하는지 확정할 수 없어, 컬럼 추가는
+# 영향 범위를 예측하기 어렵다.
+
+
+def bid_tags_available(conn) -> bool:
+    """bid_tags 테이블이 있는지 확인한다. 없으면 태깅만 건너뛴다.
+
+    verify_schema와 달리 여기서는 fail-loud로 가지 않는다. 태깅은 나중에 얹은
+    기능이라, 마이그레이션 전에 코드가 먼저 배포돼도 기존 자격요건 병합은
+    그대로 돌아야 한다. 없다는 사실은 로그로 남겨 조용히 묻히지 않게 한다.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('public.bid_tags') IS NOT NULL")
+        exists = cur.fetchone()[0]
+    if not exists:
+        logger.warning(
+            "bid_tags 테이블이 없어 태깅을 건너뛴다 — "
+            "db/schema/03_bid_tags.sql을 적용할 것(자격요건 병합은 정상 진행)"
+        )
+    return bool(exists)
+
+
+def fetch_untagged_targets(conn, limit: int) -> list[dict]:
+    """아직 태그가 없는 공고를 가져온다.
+
+    자격요건 병합 대상과 별개로 뽑는다. 병합은 daily 첨부가 도착한 공고만
+    처리하는데, 태깅에 필요한 건 제목·업종·코드뿐이라 첨부와 무관하다.
+    같은 목록을 쓰면 첨부가 영영 안 오는 공고는 태그도 못 받는다.
+
+    ⚠ 이미 태그가 있는 행은 다시 뽑지 않는다. 모델을 재학습했거나 태그 체계를
+      바꿔서 전체를 다시 매기려면 scripts/retag_all.py로 따로 돌려야 한다.
+      매 회차 재판정하게 두면, 코드가 있어도 매핑에 없는 공고가 매번 다시
+      뽑혀 무한히 순환한다.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT b.bid_id, b.bid_ntce_nm, b.bid_category, b.item_codes, "
+            "b.main_cnstty_nm "
+            "FROM bid_table b LEFT JOIN bid_tags t ON t.bid_id = b.bid_id "
+            "WHERE t.bid_id IS NULL AND b.bid_id IS NOT NULL "
+            "ORDER BY b.bid_id DESC LIMIT %s",
+            (limit,),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def upsert_tags(conn, rows: list[tuple], dry_run: bool) -> int:
+    """(bid_id, tag, source, confidence) 목록을 bid_tags에 UPSERT한다.
+
+    이력은 남기지 않는다. 태그가 바뀌는 건 대부분 추정 -> 정답 방향이고,
+    "작년에 우리가 뭐라고 분류했었나"를 추적할 요건이 없다. 필요해지면
+    bid_tags_history를 따로 붙이면 되고, 지금 안 만든다고 막히지 않는다.
+    """
+    if not rows:
+        return 0
+    if dry_run:
+        logger.info("DRY_RUN — 태그 UPSERT 생략: %d건 (예: %s)", len(rows), rows[:3])
+        return 0
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_values(
+            cur,
+            "INSERT INTO bid_tags (bid_id, tag, source, confidence) VALUES %s "
+            "ON CONFLICT (bid_id) DO UPDATE SET "
+            "tag = EXCLUDED.tag, source = EXCLUDED.source, "
+            "confidence = EXCLUDED.confidence, updated_at = NOW()",
+            rows,
+        )
+    conn.commit()
+    return len(rows)

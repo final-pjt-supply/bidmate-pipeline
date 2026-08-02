@@ -189,6 +189,17 @@ Parameters:
       확인) 병합이 그보다 느리면 신선도 병목이 되므로 맞춤. LLM 추출 실측
       처리시간(76~180초/문서, expected_file_count 1~2건 기준)에도 여유 있음.
 
+  TagMaxPerRun:
+    Type: String
+    Default: "500"
+    Description: >
+      회당 품목 태깅 상한(#97). 태그가 아직 없는 공고만 집어서 매긴다.
+      병합 상한(200)보다 크게 잡은 이유는 태깅이 S3를 안 읽고 제목만 보기
+      때문이다 — 100건 일괄 추론이 10ms 미만이다. 첫 배포 직후처럼 관찰이
+      필요하면 낮춰서 배포하고, 로그(TAG_SWEEP)를 본 뒤 올린다.
+      ⚠ DryRun은 병합과 공유하므로 태깅만 멈추는 용도로 쓸 수 없다.
+      태깅만 사실상 끄려면 이 값을 0으로 둔다.
+
   DryRun:
     Type: String
     AllowedValues: ["true", "false"]
@@ -905,6 +916,7 @@ Resources:
           MERGE_DB_USER: !Ref MergeDbUser
           MERGE_DB_PASSWORD: !Ref MergeDbPassword
           SOURCE_BUCKET: !Ref SourceBucketName
+          TAG_MAX_PER_RUN: !Ref TagMaxPerRun   # #97 — 회당 태깅 상한
           DRY_RUN: !Ref DryRun   # #80 — 하드코딩에서 파라미터로 전환. 실전 전환은 배포 시 DryRun=false 명시 전달로만 가능. 기본값 true(안전)
       EventInvokeConfig:
         MaximumRetryAttempts: 0

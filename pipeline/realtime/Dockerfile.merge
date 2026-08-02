@@ -27,6 +27,11 @@ COPY pipeline/realtime/src/common/logs.py ${LAMBDA_TASK_ROOT}/common/logs.py
 # merge/: 순수 병합 로직(logic.py) + S3 인벤토리(inventory.py) + RDS 접속(db.py).
 COPY pipeline/realtime/src/merge/ ${LAMBDA_TASK_ROOT}/merge/
 
+# tagging/: 품목 태그(#97). 모델 파일(npz+json 2.3MB)까지 이미지에 넣는다 —
+# S3에서 받아오면 콜드스타트마다 네트워크 왕복이 붙는데, 이 크기면 이미지에
+# 두는 게 단순하다. 모델을 바꿀 때만 이미지를 다시 만든다.
+COPY pipeline/realtime/src/tagging/ ${LAMBDA_TASK_ROOT}/tagging/
+
 # handlers/: merge_qualifications.py만 필요.
 COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py
 COPY pipeline/realtime/src/handlers/merge_qualifications.py ${LAMBDA_TASK_ROOT}/handlers/merge_qualifications.py

@@ -19,6 +19,7 @@ from merge import db, inventory  # noqa: E402
 FAKE_CONFIG = {
     "db_host": "h", "db_port": 5432, "db_name": "d", "db_user": "u", "db_password": "p",
     "source_bucket": "bidmate", "dry_run": True, "max_targets_per_run": 200,
+    "tag_max_per_run": 500,
 }
 
 
@@ -48,6 +49,10 @@ class FakeConn:
 def patch_config_and_connection(monkeypatch):
     monkeypatch.setattr(handler, "load_merge_db_config", lambda: FAKE_CONFIG)
     monkeypatch.setattr(db, "get_connection", lambda config: FakeConn())
+    # 이 파일은 자격요건 병합만 검증한다. 태깅 스윕(#97)은 tests/test_tagging.py
+    # 소관이라 여기서는 꺼둔다 — 켜두면 FakeConn에 cursor가 없어 스윕이 예외로
+    # 빠지고, 그 안의 conn.rollback()이 rollback_calls를 오염시킨다.
+    monkeypatch.setattr(db, "bid_tags_available", lambda conn: False)
 
 
 def test_no_targets_short_circuits_without_building_inventory(monkeypatch):
@@ -313,7 +318,7 @@ def test_zero_daily_matched_logs_no_targets_and_returns_zero_summary(monkeypatch
         result = handler.lambda_handler({}, None)
 
     assert result == {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                       "conflict_bid_ids": [], "error_bid_ids": []}
+                       "tagged": 0, "conflict_bid_ids": [], "error_bid_ids": []}
     assert apply_merge_calls == []
     assert any("MERGE_NO_TARGETS db_total=2" in r.message for r in caplog.records)
 
