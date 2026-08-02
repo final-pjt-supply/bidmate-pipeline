@@ -26,6 +26,8 @@ from sklearn.metrics import balanced_accuracy_score, classification_report, f1_s
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.svm import LinearSVC
 
+from _record import record
+
 BASE = Path(__file__).resolve().parent.parent
 CACHE = Path(__file__).resolve().parent / "cache"
 OUT = Path(__file__).resolve().parent / "outputs"
@@ -272,6 +274,7 @@ def main():
 
     # 비용: 토큰은 측정값, 금액은 단가표가 있을 때만 계산한다
     per = tok_in / len(sample)
+    usd = None
     print(f"토큰  입력 {tok_in:,} (건당 {per:.0f}) / 출력 {tok_out:,}")
     if args.model in PRICE:
         pin, pout = PRICE[args.model]
@@ -299,10 +302,21 @@ def main():
         mark = "  " if r["tfidf"] != r["tag"] else " *"  # *는 TF-IDF는 맞춘 것
         print(f"{mark} 정답={r['tag']:<12} LLM={r['llm']:<12} {r['title'][:44]}")
 
-    diff_path = OUT / f"llm_vs_tfidf_{cat}_fs{len(few_shot)}.csv"
+    # 모델명을 파일명에 넣지 않으면 모델을 바꿔가며 돌릴 때 서로 덮어쓴다
+    slug = re.sub(r"[^0-9a-z]+", "-", args.model.lower()).strip("-")
+    diff_path = OUT / f"llm_vs_tfidf_{cat}_fs{len(few_shot)}_{slug}.csv"
     sample.assign(llm=preds, tfidf=tfidf_pred).to_csv(diff_path, index=False,
                                                       encoding="utf-8-sig")
-    print(f"\n저장: {diff_path}")
+
+    m = {n: {"accuracy": float((np.array(p) == y).mean()),
+             "macro_f1": float(f1_score(y, p, average="macro", zero_division=0)),
+             "balanced_acc": float(balanced_accuracy_score(y, p))}
+         for n, p in [("llm", preds), ("tfidf", list(tfidf_pred))]}
+    record("llm_title_tagging", model=args.model, category=cat, few_shot=len(few_shot),
+           n_test=len(sample), elapsed_sec=round(elapsed, 1),
+           tokens_in=tok_in, tokens_out=tok_out, usd=round(usd, 4) if usd else None,
+           metrics=m, predictions_csv=diff_path.name)
+    print(f"\n저장: {diff_path.name}, outputs/metrics.jsonl")
 
 
 if __name__ == "__main__":

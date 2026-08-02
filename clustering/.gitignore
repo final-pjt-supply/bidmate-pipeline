@@ -1,7 +1,16 @@
-# 벡터 캐시·그리드 탐색 결과 - 100MB 넘고 재생성 가능하므로 커밋하지 않는다.
+# 벡터 캐시 - 100MB 넘고 재생성 가능하므로 커밋하지 않는다.
 # 재생성: 01_eda_preprocessing.ipynb 를 위에서부터 실행
 cache/
 
 # 모델 예측 결과 - 모델을 바꾸면 낡는 산출물이라 커밋하지 않는다.
 # 재생성: 06_apply_to_uncoded.py 실행
-outputs/
+# 디렉터리 자체를 제외하면(outputs/) 아래 예외 규칙이 무시되므로 내용물만 제외한다.
+outputs/*
+
+# 다만 실험 수치 원본은 남긴다. 화면 출력만 하면 나중에 검증할 근거가 없다.
+#   metrics.jsonl  - 모든 실험의 지표 원본 (한 줄에 한 실험)
+#   hparam_*.csv   - 그리드 2,400조합 전체. 재생성에 업종당 10~12분 걸린다.
+#   llm_vs_tfidf_* - LLM 예측 원본. 재생성하려면 LLM을 다시 호출해야 한다.
+!outputs/metrics.jsonl
+!outputs/hparam_*.csv
+!outputs/llm_vs_tfidf_*.csv
