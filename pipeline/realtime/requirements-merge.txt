@@ -1,2 +1,5 @@
 boto3
 psycopg2-binary
+# 품목 태깅(#97) 추론용. sklearn/scipy(합계 155MB)는 학습에만 필요하고
+# 추론은 곱셈과 argmax뿐이라 numpy(33MB)로 충분하다 — src/tagging/ 참고.
+numpy

@@ -55,11 +55,13 @@ def lambda_handler(event, _context):
     config = load_merge_db_config()
     conn = db.get_connection(config)
 
+    tagged = _sweep_tags(conn, config)
+
     targets = db.fetch_merge_targets(conn)
     if not targets:
         logger.info("처리 대상 없음 — 배치 종료")
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                "conflict_bid_ids": [], "error_bid_ids": []}
+                "tagged": tagged, "conflict_bid_ids": [], "error_bid_ids": []}
 
     db_total = len(targets)
 
@@ -73,7 +75,7 @@ def lambda_handler(event, _context):
     if daily_matched == 0:
         log_merge_no_targets(db_total)
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                "conflict_bid_ids": [], "error_bid_ids": []}
+                "tagged": tagged, "conflict_bid_ids": [], "error_bid_ids": []}
 
     max_targets = config["max_targets_per_run"]
     if len(targets) > max_targets:
@@ -130,8 +132,48 @@ def lambda_handler(event, _context):
         conflict_bid_ids=conflict_bid_ids,
         error_bid_ids=error_bid_ids,
     )
-    return {"total": len(targets), **counts,
+    return {"total": len(targets), **counts, "tagged": tagged,
             "conflict_bid_ids": conflict_bid_ids, "error_bid_ids": error_bid_ids}
+
+
+def _sweep_tags(conn, config: dict) -> int:
+    """태그가 없는 공고에 품목 태그를 매긴다(#97).
+
+    자격요건 병합 대상과 따로 뽑는다 — 병합은 daily 첨부가 온 공고만 처리하는데
+    태깅에 필요한 건 제목·업종·코드뿐이라 첨부와 무관하다. 같은 목록을 쓰면
+    첨부가 영영 안 오는 공고는 태그도 못 받는다.
+
+    태깅 실패가 자격요건 병합을 막지 않게 통째로 감싼다 — 태깅은 나중에 얹은
+    기능이고, 이게 죽는다고 이미 돌던 배치까지 세울 이유가 없다. 실패해도
+    해당 공고는 여전히 태그가 없으니 다음 회차가 자연스럽게 다시 집는다.
+    """
+    try:
+        if not db.bid_tags_available(conn):
+            return 0
+        targets = db.fetch_untagged_targets(conn, config["tag_max_per_run"])
+        if not targets:
+            return 0
+
+        from tagging.rules import decide_tag       # numpy 로드를 필요할 때만
+
+        rows = []
+        for row in targets:
+            tag, source, confidence = decide_tag(row)
+            rows.append((row["bid_id"], tag, source, confidence))
+
+        written = db.upsert_tags(conn, rows, config["dry_run"])
+        by_source: dict[str, int] = {}
+        for _, _, source, _ in rows:
+            by_source[source] = by_source.get(source, 0) + 1
+        logger.info("TAG_SWEEP 대상=%d 기록=%d 출처별=%s", len(targets), written, by_source)
+        return written
+    except Exception:
+        logger.exception("태깅 스윕 실패 — 자격요건 병합은 그대로 진행")
+        try:
+            conn.rollback()
+        except Exception:
+            logger.error("태깅 실패 후 rollback도 실패 — 커넥션 손상 가능성", exc_info=True)
+        return 0
 
 
 def _process_target(conn, target: dict, inv: dict, config: dict) -> tuple[str, bool] | None:

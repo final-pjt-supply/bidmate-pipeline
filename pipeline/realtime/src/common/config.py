@@ -90,4 +90,8 @@ def load_merge_db_config() -> dict:
         # pending/partial로 남아있어 다음 회차 fetch_merge_targets에 자연스럽게
         # 다시 잡힌다.
         "max_targets_per_run": int(os.environ.get("MERGE_MAX_TARGETS_PER_RUN", "200")),
+        # 회당 태깅 상한(#97). 병합 상한보다 크게 잡는다 — 태깅은 S3를 안 읽고
+        # 제목만 보므로 100건 일괄 추론이 10ms 미만이다. 기존 24,227건 백필도
+        # 이 스윕이 회차마다 갉아먹어 자연히 끝난다(500건 x 5분 주기 = 약 4시간).
+        "tag_max_per_run": int(os.environ.get("TAG_MAX_PER_RUN", "500")),
     }
