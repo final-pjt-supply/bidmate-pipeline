@@ -14,3 +14,7 @@ outputs/*
 !outputs/metrics.jsonl
 !outputs/hparam_*.csv
 !outputs/llm_vs_tfidf_*.csv
+
+# 모델 파일 - 스크립트로 재생성 가능(17번). raw/f32 변형은 크기 비교용이라 제외.
+# 운영에 실을 것은 배포 시점에 다시 만든다.
+artifacts/
