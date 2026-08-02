@@ -1,0 +1,22 @@
+C:\Users\user\Desktop\PROJECTS\bidding-agent\clustering\13_label_consistency.py:63: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  raw = pd.read_sql("""
+C:\Users\user\Desktop\PROJECTS\bidding-agent\clustering\13_label_consistency.py:73: UserWarning: pandas only supports SQLAlchemy connectable (engine/connection) or database string URI or sqlite3 DBAPI2 connection. Other DBAPI2 objects are not tested. Please consider using SQLAlchemy.
+  raw = pd.read_sql("""
+========================================================================
+[물품] 학습 대상 3,382건
+========================================================================
+  제목이 겹치는 그룹        17개
+  그중 태그가 갈린 그룹     1개 (5.9%)
+  해당 공고 수             14건 (0.4%)
+
+  실제 사례 (같은 제목, 다른 태그)
+    2026년도 실험실습기자재 확충사업 [슬라이드 스캐너] 구입
+      -> {'실험·분석장비': 9, 'IT·통신장비': 3, '산업·정밀기계': 1, '의료장비': 1}
+
+========================================================================
+[용역] 학습 대상 3,242건
+========================================================================
+  제목이 겹치는 그룹        4개
+  그중 태그가 갈린 그룹     0개 (0.0%)
+  해당 공고 수             0건 (0.0%)
+

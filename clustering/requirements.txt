@@ -7,3 +7,4 @@ jupyter
 ipykernel
 psycopg2-binary
 requests
+boto3
