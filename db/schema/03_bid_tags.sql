@@ -11,8 +11,10 @@
 -- 이력은 남기지 않는다. 태그가 바뀌는 건 대부분 추정 -> 정답 방향이라
 -- 옛 값을 남길 값어치가 적다. 필요해지면 bid_tags_history를 따로 붙인다.
 
+-- 외래키는 걸지 않는다. bid_table은 다른 팀 소유라 그쪽 삭제/재생성 정책에
+-- 이 테이블이 묶이면 곤란하다. 고아 행이 생겨도 조회는 INNER JOIN이라 안 보인다.
 CREATE TABLE IF NOT EXISTS bid_tags (
-    bid_id      varchar(100) PRIMARY KEY,
+    bid_id      varchar(60) PRIMARY KEY,   -- bid_table.bid_id와 동일 길이
     tag         varchar(50)  NOT NULL,
     -- 무엇으로 정했는지. 정확도가 다르므로 통계에서 구분할 수 있어야 한다.
     --   cnstty_column      공사 main_cnstty_nm 컬럼 (발주기관 입력값)
