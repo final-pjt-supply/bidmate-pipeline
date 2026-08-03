@@ -14,6 +14,9 @@ outputs/*
 !outputs/metrics.jsonl
 !outputs/hparam_*.csv
 !outputs/llm_vs_tfidf_*.csv
+#   search_*.csv   - 재설계 실험(22~25번)의 탐색 결과 원본.
+#                    표현 480조합·분류기 420조합을 다시 돌리려면 업종당 1시간이다.
+!outputs/search_*.csv
 
 # 모델 파일 - 스크립트로 재생성 가능(17번). raw/f32 변형은 크기 비교용이라 제외.
 # 운영에 실을 것은 배포 시점에 다시 만든다.
