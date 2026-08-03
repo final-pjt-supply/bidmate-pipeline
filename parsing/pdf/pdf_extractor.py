@@ -1,3 +1,5 @@
+import bisect
+
 import fitz
 
 LANDSCAPE_RATIO = 1.2
@@ -76,6 +78,40 @@ def _recover_cell_text(
     return " ".join(w[4] for w in words).strip()
 
 
+def _build_grid_cell_index(
+    cells_flat: list,
+    x_coords: list,
+    y_coords: list,
+) -> dict[tuple[int, int], tuple[int, fitz.Rect]]:
+    """격자 칸 (row_idx, col_idx) → (cells_flat 인덱스, Rect) 색인.
+
+    격자 칸마다 cells_flat 전체를 다시 순회하면 (행×열)×셀수 = O(n²)가 되어, 셀이 수천
+    개인 표에서 Lambda 타임아웃(120초)에 걸렸다 — 2.4MB 문서가 120초를 넘겼다(#107).
+    대신 셀이 자기가 덮는 칸에만 자신을 등록해, 전체 작업량을 격자 칸 수로 낮춘다.
+
+    x_coords·y_coords가 정렬돼 있으므로 각 셀이 덮는 칸 범위를 bisect로 바로 구한다.
+    setdefault라서 cells_flat 인덱스가 작은 셀이 우선한다 — 기존 선형 탐색 + break와
+    같은 결과(먼저 만난 셀 우선)이고, 병합 셀 하나가 여러 칸을 덮는 동작도 보존된다.
+    """
+    centers_x = [(x_coords[i] + x_coords[i + 1]) / 2 for i in range(len(x_coords) - 1)]
+    centers_y = [(y_coords[i] + y_coords[i + 1]) / 2 for i in range(len(y_coords) - 1)]
+
+    index: dict[tuple[int, int], tuple[int, fitz.Rect]] = {}
+    for idx, cell in enumerate(cells_flat):
+        if cell is None:
+            continue
+        cr = fitz.Rect(cell)
+        # bisect 경계가 기존 조건 cr.x0 <= cx <= cr.x1 과 정확히 같은 구간을 준다.
+        col_lo = bisect.bisect_left(centers_x, cr.x0)
+        col_hi = bisect.bisect_right(centers_x, cr.x1)
+        row_lo = bisect.bisect_left(centers_y, cr.y0)
+        row_hi = bisect.bisect_right(centers_y, cr.y1)
+        for ci in range(col_lo, col_hi):
+            for ri in range(row_lo, row_hi):
+                index.setdefault((ri, ci), (idx, cr))
+    return index
+
+
 def _find_cell_for_image(img_rect: fitz.Rect, cells_flat: list) -> int | None:
     cx = (img_rect.x0 + img_rect.x1) / 2
     cy = (img_rect.y0 + img_rect.y1) / 2
@@ -119,23 +155,15 @@ def _format_table(
         if idx is not None:
             cells_flat_to_imgs.setdefault(idx, []).append((img_rect, xref))
 
+    # 칸→셀 조회를 루프 밖에서 한 번만 만든다(#107). 범위를 벗어난 칸은 애초에 색인에
+    # 없으므로, 기존의 row_idx/col_idx 상한 검사는 get()의 기본값으로 대체된다.
+    grid_cell_index = _build_grid_cell_index(cells_flat, x_coords, y_coords)
+
     lines = []
     for row_idx, row in enumerate(extracted):
         row_cells = []
         for col_idx, cell_text in enumerate(row):
-            cell_rect = None
-            cells_flat_idx = None
-            if row_idx < len(y_coords) - 1 and col_idx < len(x_coords) - 1:
-                cy = (y_coords[row_idx] + y_coords[row_idx + 1]) / 2
-                cx = (x_coords[col_idx] + x_coords[col_idx + 1]) / 2
-                for idx, cell in enumerate(cells_flat):
-                    if cell is None:
-                        continue
-                    cr = fitz.Rect(cell)
-                    if cr.x0 <= cx <= cr.x1 and cr.y0 <= cy <= cr.y1:
-                        cell_rect = cr
-                        cells_flat_idx = idx
-                        break
+            cells_flat_idx, cell_rect = grid_cell_index.get((row_idx, col_idx), (None, None))
 
             cell_imgs = cells_flat_to_imgs.get(cells_flat_idx, []) if cells_flat_idx is not None else []
 
