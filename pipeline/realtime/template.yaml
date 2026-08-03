@@ -145,7 +145,7 @@ Parameters:
   # ============================================================
   MergeImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:085cfb01bdba1551106d72d2e81f346a4a86c70ee24bc4e80864664cecc26861
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:b2557430e2c97f2cace724bd1461fded0cf89c7d0add1a9c22eed7b23f129ce0
     Description: >
       RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). 2026-07-14 #75
       대응(required_certs 타입 정정 + rollback + 회당 상한, 커밋 4f41e94)
