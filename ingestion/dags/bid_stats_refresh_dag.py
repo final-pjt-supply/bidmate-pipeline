@@ -15,6 +15,12 @@
     백엔드가 blue-green 배포라 전환 구간에 컨테이너가 둘 뜬다. 컨테이너 내부 크론은
     그때 REFRESH를 중복 발사한다. 막으려면 advisory lock을 직접 짜야 하는데 없는
     문제를 만드는 것이다. Airflow는 스케줄러가 하나라 이 문제가 없다.
+
+접속 정보 (STATS_DB_*)
+    이 DAG은 이 compose가 처음으로 서비스 RDS에 붙는 태스크다. 기존 수집·다운로드
+    DAG은 결과를 전부 S3에 쓰기 때문에 RDS 설정이 아예 없었다(compose 주석의
+    "외부 RDS 없음"). 그래서 STATS_DB_*를 새로 추가했다 — POSTGRES_*는 이미
+    Airflow 메타DB가 쓰고 있어 재사용할 수 없다.
 """
 
 from __future__ import annotations
@@ -45,17 +51,31 @@ log = logging.getLogger("bid-stats-refresh")
 
 
 def _dsn() -> str:
-    """앱과 같은 POSTGRES_* 환경변수를 읽는다(app/config.py와 동일한 키)."""
+    """서비스 RDS 접속 문자열. STATS_DB_* 환경변수에서 읽는다.
+
+    앱과 같은 POSTGRES_*를 쓰면 안 된다 — 이 compose에서 그 이름은 Airflow 자신의
+    메타DB(같은 박스의 postgres 컨테이너)가 이미 쓰고 있다. 그대로 쓰면 조용히
+    메타DB에 붙어 "relation bid_stats does not exist"로 끝난다.
+
+    기본값도 두지 않는다. host를 localhost로 폴백시키면 설정 누락이 '접속 실패'가
+    아니라 '엉뚱한 DB 접속'으로 나타나 원인 파악이 늦어진다.
+    """
+    missing = [k for k in ("STATS_DB_HOST", "STATS_DB_NAME", "STATS_DB_USER",
+                           "STATS_DB_PASSWORD") if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"서비스 DB 접속 정보가 없다: {', '.join(missing)} — "
+            "ingestion/.env에 STATS_DB_*를 넣고 compose를 다시 올릴 것"
+        )
     params = {
-        "host": os.environ.get("POSTGRES_HOST", "localhost"),
-        "port": os.environ.get("POSTGRES_PORT", "5432"),
-        "dbname": os.environ.get("POSTGRES_DB", "bidding_agent"),
-        "user": os.environ.get("POSTGRES_USER", "bidding_agent"),
-        "password": os.environ.get("POSTGRES_PASSWORD", "bidding_agent"),
+        "host": os.environ["STATS_DB_HOST"],
+        "port": os.environ.get("STATS_DB_PORT", "5432"),
+        "dbname": os.environ["STATS_DB_NAME"],
+        "user": os.environ["STATS_DB_USER"],
+        "password": os.environ["STATS_DB_PASSWORD"],
+        # RDS는 보통 SSL 필수다. 로컬 docker(무SSL)에선 비워 둔다.
+        "sslmode": os.environ.get("STATS_DB_SSLMODE", "require"),
     }
-    sslmode = os.environ.get("POSTGRES_SSLMODE")
-    if sslmode:
-        params["sslmode"] = sslmode
     return " ".join(f"{k}={v}" for k, v in params.items())
 
 

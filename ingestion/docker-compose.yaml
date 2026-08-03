@@ -26,6 +26,15 @@ x-airflow-common: &airflow-common
     BIDDING_AGENT_PYTHON: python
     G2B_SERVICE_KEY: ${G2B_SERVICE_KEY}
     S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    # ── 서비스 RDS (bid_stats_refresh DAG 전용) ──
+    # 위 POSTGRES_*는 Airflow 메타DB(postgres 컨테이너)라 재사용할 수 없다.
+    # 이름을 겹치면 DAG이 조용히 메타DB에 붙는다.
+    STATS_DB_HOST: ${STATS_DB_HOST}
+    STATS_DB_PORT: ${STATS_DB_PORT:-5432}
+    STATS_DB_NAME: ${STATS_DB_NAME}
+    STATS_DB_USER: ${STATS_DB_USER}
+    STATS_DB_PASSWORD: ${STATS_DB_PASSWORD}
+    STATS_DB_SSLMODE: ${STATS_DB_SSLMODE:-require}
     # AWS 자격증명은 EC2 IAM 역할(instance profile)로 자동 주입 — 키를 넣지 말 것.
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
   volumes:
