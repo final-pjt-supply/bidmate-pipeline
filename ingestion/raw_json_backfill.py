@@ -29,7 +29,8 @@ except ModuleNotFoundError:
 
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+# https 필수 - raw_json_daily.py와 같은 이유(80 포트가 2026-08-02부터 무응답).
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 RAW_PREFIX = "raw/raw/backfill"
 CURATED_PREFIX = "raw/curated/backfill"
 

@@ -28,7 +28,10 @@ except ModuleNotFoundError:
 
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+# https 필수. 2026-08-02 14시경부터 80 포트가 응답을 끊었다(연결은 되는데 read
+# timeout). 같은 경로를 443으로 부르면 55ms 만에 응답한다. 공지 없이 바뀌었고,
+# 서비스 장애가 아니라 프로토콜 정책 변경이라 공지 대상도 아니었던 것으로 보인다.
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 RAW_PREFIX = "raw/raw/daily"
 CURATED_PREFIX = "raw/curated/daily"
 
