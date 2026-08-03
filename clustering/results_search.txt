@@ -1,0 +1,283 @@
+==============================================================================
+[물품] 탐색  풀 4,061건 / 태그 20종 / 시험셋은 열지 않음
+  sklearn 1.9.0 / numpy 2.4.6 / python 3.11.9 / seed 42
+==============================================================================
+
+[기준선]
+            기준선  CV_MacroF1   CV_std
+         최빈 클래스    0.014271 0.000038
+TF-IDF 기본값 + 탐침    0.623520 0.023196
+  참고: 코드 규칙만으로 커버되는 비율 = 48.1% (나머지 51.9%가 모델이 맡을 몫)
+
+[표현 탐색] 480조합 × 5-fold, 탐침 LinearSVC{'C': 1.0, 'class_weight': 'balanced'}
+    40/480      81초 (잔여 약 890초)
+    80/480     197초 (잔여 약 984초)
+   120/480     274초 (잔여 약 821초)
+   160/480     368초 (잔여 약 737초)
+   200/480     442초 (잔여 약 619초)
+   240/480     486초 (잔여 약 486초)
+   280/480     584초 (잔여 약 417초)
+   320/480     732초 (잔여 약 366초)
+   360/480     827초 (잔여 약 276초)
+   400/480     943초 (잔여 약 189초)
+   440/480    1032초 (잔여 약 94초)
+   480/480    1077초 (잔여 약 0초)
+
+[표현 상위 10]
+   입력 analyzer  ngram  min_df  max_df  sublinear  use_idf  CV_MacroF1   CV_std
+title  char_wb (2, 3)       1     0.9       True     True    0.731833 0.023945
+title  char_wb (2, 3)       1     1.0       True     True    0.731833 0.023945
+title     char (2, 3)       1     0.9       True     True    0.731197 0.029347
+title     char (2, 3)       1     1.0       True     True    0.731197 0.029347
+title     char (2, 3)       1     1.0      False     True    0.730636 0.028074
+title     char (2, 3)       1     0.9      False     True    0.730636 0.028074
+title  char_wb (2, 3)       1     1.0      False     True    0.730597 0.024194
+title  char_wb (2, 3)       1     0.9      False     True    0.730597 0.024194
+title     char (2, 3)       1     1.0       True    False    0.725968 0.025052
+title     char (2, 3)       1     0.9       True    False    0.725968 0.025052
+
+[축별 영향 - CV Macro F1 평균의 최대-최소 차이]
+  입력         차이 0.0199   title=0.673  instt_title=0.653
+  analyzer   차이 0.1128   char_wb=0.686  char=0.685  word=0.573
+  ngram      차이 0.1349   (2, 3)=0.706  (2, 4)=0.695  (2, 5)=0.687  (3, 5)=0.652  (1, 1)=0.574  (1, 2)=0.572
+  min_df     차이 0.0330   1=0.679  2=0.663  3=0.646
+  max_df     차이 0.0000   0.9=0.663  1.0=0.663
+  sublinear  차이 0.0023   True=0.664  False=0.662
+  use_idf    차이 0.0085   True=0.667  False=0.658
+
+[어휘 특성 - 1위 표현]
+  피처 32,588 / 문서당 비영 50 / 밀도 0.153% / 1회 등장 44%
+
+[축소·선택] 상위 10개 표현 × 8가지
+  표현 1/10 완료
+  표현 2/10 완료
+  표현 3/10 완료
+  표현 4/10 완료
+  표현 5/10 완료
+  표현 6/10 완료
+  표현 7/10 완료
+  표현 8/10 완료
+  표현 9/10 완료
+  표현 10/10 완료
+
+[축소 방식별 최고 - 표현 순위별]
+ 표현순위        축소                                     설정  CV_MacroF1   CV_std
+    1        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.731833 0.023945
+    2        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.731833 0.023945
+    4        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.731197 0.029347
+    3        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.731197 0.029347
+    5        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.730636 0.028074
+    6        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.730636 0.028074
+    7        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.730597 0.024194
+    8        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.730597 0.024194
+   10        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.725968 0.025052
+    9        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.725968 0.025052
+    3 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.712787 0.034372
+    4 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.712787 0.034372
+    6 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.710920 0.037040
+    5 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.710920 0.037040
+    5        L1                                  C=3.0    0.709758 0.028766
+
+  축소 없음 최고 0.7318 / 전체 최고 없음 0.7318 (±0.0239)  차이 +0.0000
+  -> 표준편차 안. 사전등록 규칙에 따라 동률로 보고 더 단순한 '없음'을 택한다.
+
+[분류기·하이퍼파라미터] 표현 10 × 42조합 = 420회 × 5-fold
+  42/420
+  84/420
+  126/420
+  168/420
+  210/420
+  252/420
+  294/420
+  336/420
+  378/420
+  420/420
+  ! LogReg(OvR) 최적 C=30.0가 그리드 경계 - [90.0, 300.0]로 확장
+  ! LogReg(다항) 최적 C=30.0가 그리드 경계 - [90.0, 300.0]로 확장
+
+[상위 15]
+      분류기  표현순위    입력 analyzer  ngram  min_df  max_df  sublinear  use_idf                                      설정  CV_MacroF1   CV_std
+LinearSVC     8 title  char_wb (2, 3)       1     0.9      False     True  {'C': 3.0, 'class_weight': 'balanced'}    0.737846 0.021437
+LinearSVC     7 title  char_wb (2, 3)       1     1.0      False     True  {'C': 3.0, 'class_weight': 'balanced'}    0.737846 0.021437
+LinearSVC     8 title  char_wb (2, 3)       1     0.9      False     True        {'C': 3.0, 'class_weight': None}    0.737669 0.018319
+LinearSVC     7 title  char_wb (2, 3)       1     1.0      False     True        {'C': 3.0, 'class_weight': None}    0.737669 0.018319
+LinearSVC     2 title  char_wb (2, 3)       1     1.0       True     True        {'C': 3.0, 'class_weight': None}    0.737418 0.020144
+LinearSVC     1 title  char_wb (2, 3)       1     0.9       True     True        {'C': 3.0, 'class_weight': None}    0.737418 0.020144
+LinearSVC     2 title  char_wb (2, 3)       1     1.0       True     True  {'C': 3.0, 'class_weight': 'balanced'}    0.737352 0.022222
+LinearSVC     1 title  char_wb (2, 3)       1     0.9       True     True  {'C': 3.0, 'class_weight': 'balanced'}    0.737352 0.022222
+LinearSVC     1 title  char_wb (2, 3)       1     0.9       True     True       {'C': 10.0, 'class_weight': None}    0.736263 0.021536
+LinearSVC     2 title  char_wb (2, 3)       1     1.0       True     True       {'C': 10.0, 'class_weight': None}    0.736263 0.021536
+LinearSVC     2 title  char_wb (2, 3)       1     1.0       True     True {'C': 10.0, 'class_weight': 'balanced'}    0.736098 0.023430
+LinearSVC     1 title  char_wb (2, 3)       1     0.9       True     True {'C': 10.0, 'class_weight': 'balanced'}    0.736098 0.023430
+LinearSVC     2 title  char_wb (2, 3)       1     1.0       True     True       {'C': 30.0, 'class_weight': None}    0.735584 0.020514
+LinearSVC     1 title  char_wb (2, 3)       1     0.9       True     True       {'C': 30.0, 'class_weight': None}    0.735584 0.020514
+LinearSVC     9 title     char (2, 3)       1     1.0       True    False  {'C': 3.0, 'class_weight': 'balanced'}    0.735019 0.022518
+
+[분류기별 최고]
+         분류기  표현순위    입력                                       설정  CV_MacroF1   CV_std
+   LinearSVC     8 title   {'C': 3.0, 'class_weight': 'balanced'}    0.737846 0.021437
+ LogReg(OvR)     3 title  {'C': 30.0, 'class_weight': 'balanced'}    0.734104 0.022089
+  LogReg(다항)     4 title {'C': 300.0, 'class_weight': 'balanced'}    0.733012 0.018915
+ComplementNB     9 title            {'alpha': 0.05, 'norm': True}    0.705682 0.021374
+
+  1위 LinearSVC 0.7378 (±0.0214)
+  표준편차 안 동률 후보 142개, 분류기 ['LinearSVC', 'LogReg(OvR)', 'LogReg(다항)']
+  귀인: LinearSVC vs LogReg(OvR)는 손실 함수만, LogReg(OvR) vs LogReg(다항)은 다중클래스 전략만 다르다.
+
+[모델 저장] model_thng.joblib  피처 32,588 / 학습 4,061건
+  LinearSVC {'C': 3.0, 'class_weight': 'balanced'} / 입력 title / {'analyzer': 'char_wb', 'ngram_range': (2, 3), 'min_df': 1, 'max_df': 0.9, 'sublinear_tf': False, 'use_idf': True}
+
+[트리 계열] 1위 표현 + SVD-300 위에서 평가
+  RandomForest 32초
+  ExtraTrees 27초
+  HistGB 278초
+           모델  CV_MacroF1   CV_std
+LinearSVC(대조)    0.644887 0.026042
+       HistGB    0.617773 0.011568
+ RandomForest    0.608064 0.031163
+   ExtraTrees    0.599884 0.020005
+
+총 5291초
+
+##################### 용역 #####################
+
+==============================================================================
+[용역] 탐색  풀 4,284건 / 태그 9종 / 시험셋은 열지 않음
+  sklearn 1.9.0 / numpy 2.4.6 / python 3.11.9 / seed 42
+==============================================================================
+
+[기준선]
+            기준선  CV_MacroF1   CV_std
+         최빈 클래스    0.059432 0.000089
+TF-IDF 기본값 + 탐침    0.732266 0.021970
+  참고: 코드 규칙만으로 커버되는 비율 = 37.1% (나머지 62.9%가 모델이 맡을 몫)
+
+[표현 탐색] 480조합 × 5-fold, 탐침 LinearSVC{'C': 1.0, 'class_weight': 'balanced'}
+    40/480     110초 (잔여 약 1210초)
+    80/480     272초 (잔여 약 1359초)
+   120/480     341초 (잔여 약 1023초)
+   160/480     427초 (잔여 약 854초)
+   200/480     493초 (잔여 약 690초)
+   240/480     532초 (잔여 약 532초)
+   280/480     622초 (잔여 약 444초)
+   320/480     749초 (잔여 약 374초)
+   360/480     832초 (잔여 약 277초)
+   400/480     928초 (잔여 약 186초)
+   440/480    1027초 (잔여 약 93초)
+   480/480    1070초 (잔여 약 0초)
+
+[표현 상위 10]
+   입력 analyzer  ngram  min_df  max_df  sublinear  use_idf  CV_MacroF1   CV_std
+title  char_wb (2, 3)       3     1.0       True     True    0.822086 0.029306
+title  char_wb (2, 3)       3     0.9       True     True    0.822086 0.029306
+title  char_wb (2, 3)       3     0.9      False     True    0.821439 0.026798
+title  char_wb (2, 3)       3     1.0      False     True    0.821439 0.026798
+title  char_wb (2, 3)       1     0.9      False    False    0.817795 0.028495
+title  char_wb (2, 3)       1     1.0      False    False    0.817795 0.028495
+title     char (2, 3)       1     0.9       True    False    0.817526 0.029278
+title     char (2, 3)       1     1.0       True    False    0.817526 0.029278
+title     char (2, 3)       3     1.0       True     True    0.817006 0.022337
+title     char (2, 3)       3     0.9       True     True    0.817006 0.022337
+
+[축별 영향 - CV Macro F1 평균의 최대-최소 차이]
+  입력         차이 0.0097   title=0.784  instt_title=0.774
+  analyzer   차이 0.0764   char=0.795  char_wb=0.794  word=0.719
+  ngram      차이 0.0879   (2, 3)=0.807  (2, 4)=0.801  (2, 5)=0.798  (3, 5)=0.772  (1, 1)=0.719  (1, 2)=0.719
+  min_df     차이 0.0079   1=0.784  2=0.778  3=0.776
+  max_df     차이 0.0000   0.9=0.779  1.0=0.779
+  sublinear  차이 0.0021   True=0.780  False=0.778
+  use_idf    차이 0.0032   False=0.781  True=0.778
+
+[어휘 특성 - 1위 표현]
+  피처 10,475 / 문서당 비영 44 / 밀도 0.424% / 1회 등장 0%
+
+[축소·선택] 상위 10개 표현 × 8가지
+  표현 1/10 완료
+  표현 2/10 완료
+  표현 3/10 완료
+  표현 4/10 완료
+  표현 5/10 완료
+  표현 6/10 완료
+  표현 7/10 완료
+  표현 8/10 완료
+  표현 9/10 완료
+  표현 10/10 완료
+
+[축소 방식별 최고 - 표현 순위별]
+ 표현순위        축소                                     설정  CV_MacroF1   CV_std
+    1        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.822086 0.029306
+    2        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.822086 0.029306
+    4        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.821439 0.026798
+    3        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.821439 0.026798
+    2 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.817825 0.025727
+    1 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.817825 0.025727
+    5        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817795 0.028495
+    6        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817795 0.028495
+    7        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817526 0.029278
+    8        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817526 0.029278
+   10        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817006 0.022337
+    9        없음 {'C': 1.0, 'class_weight': 'balanced'}    0.817006 0.022337
+    3 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.815333 0.027568
+    4 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.815333 0.027568
+    9 chi2-5000 {'C': 1.0, 'class_weight': 'balanced'}    0.814427 0.015047
+
+  축소 없음 최고 0.8221 / 전체 최고 없음 0.8221 (±0.0293)  차이 +0.0000
+  -> 표준편차 안. 사전등록 규칙에 따라 동률로 보고 더 단순한 '없음'을 택한다.
+
+[분류기·하이퍼파라미터] 표현 10 × 42조합 = 420회 × 5-fold
+  42/420
+  84/420
+  126/420
+  168/420
+  210/420
+  252/420
+  294/420
+  336/420
+  378/420
+  420/420
+  ! LogReg(OvR) 최적 C=30.0가 그리드 경계 - [90.0, 300.0]로 확장
+  ! LogReg(다항) 최적 C=30.0가 그리드 경계 - [90.0, 300.0]로 확장
+
+[상위 15]
+        분류기  표현순위    입력 analyzer  ngram  min_df  max_df  sublinear  use_idf                                      설정  CV_MacroF1   CV_std
+ LogReg(다항)     6 title  char_wb (2, 3)       1     1.0      False    False {'C': 30.0, 'class_weight': 'balanced'}    0.827577 0.030348
+ LogReg(다항)     5 title  char_wb (2, 3)       1     0.9      False    False {'C': 30.0, 'class_weight': 'balanced'}    0.827577 0.030348
+ LogReg(다항)     6 title  char_wb (2, 3)       1     1.0      False    False {'C': 90.0, 'class_weight': 'balanced'}    0.825783 0.029571
+LogReg(OvR)     6 title  char_wb (2, 3)       1     1.0      False    False {'C': 30.0, 'class_weight': 'balanced'}    0.822625 0.034144
+LogReg(OvR)     5 title  char_wb (2, 3)       1     0.9      False    False {'C': 30.0, 'class_weight': 'balanced'}    0.822625 0.034144
+  LinearSVC     1 title  char_wb (2, 3)       3     1.0       True     True  {'C': 1.0, 'class_weight': 'balanced'}    0.822086 0.029306
+  LinearSVC     2 title  char_wb (2, 3)       3     0.9       True     True  {'C': 1.0, 'class_weight': 'balanced'}    0.822086 0.029306
+  LinearSVC     9 title     char (2, 3)       3     1.0       True     True  {'C': 0.3, 'class_weight': 'balanced'}    0.821697 0.021493
+  LinearSVC    10 title     char (2, 3)       3     0.9       True     True  {'C': 0.3, 'class_weight': 'balanced'}    0.821697 0.021493
+  LinearSVC     3 title  char_wb (2, 3)       3     0.9      False     True  {'C': 1.0, 'class_weight': 'balanced'}    0.821439 0.026798
+  LinearSVC     4 title  char_wb (2, 3)       3     1.0      False     True  {'C': 1.0, 'class_weight': 'balanced'}    0.821439 0.026798
+ LogReg(다항)     5 title  char_wb (2, 3)       1     0.9      False    False {'C': 10.0, 'class_weight': 'balanced'}    0.821206 0.031583
+ LogReg(다항)     6 title  char_wb (2, 3)       1     1.0      False    False {'C': 10.0, 'class_weight': 'balanced'}    0.821206 0.031583
+  LinearSVC     4 title  char_wb (2, 3)       3     1.0      False     True  {'C': 0.3, 'class_weight': 'balanced'}    0.820191 0.026568
+  LinearSVC     3 title  char_wb (2, 3)       3     0.9      False     True  {'C': 0.3, 'class_weight': 'balanced'}    0.820191 0.026568
+
+[분류기별 최고]
+         분류기  표현순위    입력                                      설정  CV_MacroF1   CV_std
+  LogReg(다항)     6 title {'C': 30.0, 'class_weight': 'balanced'}    0.827577 0.030348
+ LogReg(OvR)     6 title {'C': 30.0, 'class_weight': 'balanced'}    0.822625 0.034144
+   LinearSVC     1 title  {'C': 1.0, 'class_weight': 'balanced'}    0.822086 0.029306
+ComplementNB     9 title          {'alpha': 0.01, 'norm': False}    0.769157 0.016431
+
+  1위 LogReg(다항) 0.8276 (±0.0303)
+  표준편차 안 동률 후보 186개, 분류기 ['LinearSVC', 'LogReg(OvR)', 'LogReg(다항)']
+  귀인: LinearSVC vs LogReg(OvR)는 손실 함수만, LogReg(OvR) vs LogReg(다항)은 다중클래스 전략만 다르다.
+
+[모델 저장] model_servc.joblib  피처 30,174 / 학습 4,284건
+  LogReg(다항) {'C': 30.0, 'class_weight': 'balanced'} / 입력 title / {'analyzer': 'char_wb', 'ngram_range': (2, 3), 'min_df': 1, 'max_df': 1.0, 'sublinear_tf': False, 'use_idf': False}
+
+[트리 계열] 1위 표현 + SVD-300 위에서 평가
+  RandomForest 23초
+  ExtraTrees 18초
+  HistGB 136초
+           모델  CV_MacroF1   CV_std
+LinearSVC(대조)    0.791035 0.033157
+ RandomForest    0.726309 0.022758
+       HistGB    0.708802 0.026050
+   ExtraTrees    0.652365 0.024868
+
+총 3345초
