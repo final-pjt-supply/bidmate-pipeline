@@ -17,7 +17,9 @@ _MIN_TEXT_LENGTH = 20
 _SCHEMA_KEYS = ("page", "text")
 
 
-def build_result(bid_id: str, document_id: str, pages: list[dict]) -> dict:
+def build_result(
+    bid_id: str, document_id: str, pages: list[dict], partial: bool = False
+) -> dict:
     result_pages = []
     for p in pages:
         stripped_len = len(p["text"].strip())
@@ -27,4 +29,12 @@ def build_result(bid_id: str, document_id: str, pages: list[dict]) -> dict:
                 bid_id, document_id, p["page"], stripped_len,
             )
         result_pages.append({k: p[k] for k in _SCHEMA_KEYS})
-    return {"bid_id": bid_id, "document_id": document_id, "pages": result_pages}
+    result = {"bid_id": bid_id, "document_id": document_id, "pages": result_pages}
+    if partial:
+        # 본문 일부만 회수된 문서. 소비처(embed 등)는 pages만 읽으므로 동작에는
+        # 영향이 없고, 나중에 잘린 문서만 골라 재처리할 수 있게 표시만 남긴다.
+        logger.warning(
+            "부분 추출 결과 저장: bid_id=%s document_id=%s", bid_id, document_id,
+        )
+        result["partial"] = True
+    return result

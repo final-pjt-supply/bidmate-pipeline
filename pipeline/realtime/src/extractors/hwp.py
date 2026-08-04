@@ -26,4 +26,7 @@ def extract(hwp_bytes: bytes, describe_fn=None) -> ExtractResult:
         {"page": i, "text": page_text}
         for i, page_text in enumerate(paginate(result["text"]), start=1)
     ]
-    return {"source_type": "hwp", "pages": pages, "images": result["images"]}
+    out: ExtractResult = {"source_type": "hwp", "pages": pages, "images": result["images"]}
+    if result.get("partial"):
+        out["partial"] = True
+    return out
