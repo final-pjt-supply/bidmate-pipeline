@@ -239,6 +239,9 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: realtime-extract-hwp-queue
+      # Lambda Timeout을 300s로 올렸지만(대용량 HWP 대응) 720 그대로 둔다. 720 > 300이라
+      # 실행 중인 메시지가 다시 보이는 일은 없고, 6배(1800)로 맞추면 재시도 간격이
+      # 12분 → 30분, DLQ 도달이 최대 36분 → 90분으로 늘어나 실패를 늦게 알게 된다.
       VisibilityTimeout: 720
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RealtimeExtractHwpDlq.Arn
@@ -711,7 +714,9 @@ Resources:
       ImageConfig:
         Command: ["handlers.extract_hwp.lambda_handler"]
       Role: !GetAtt RealtimeExtractHwpFunctionRole.Arn
-      Timeout: 120
+      # 7.2MB HWP가 120s를 넘겨 타임아웃 → DLQ 된 사례가 실측으로 확인돼 상향.
+      # 큐 VisibilityTimeout(720)이 이보다 크므로 실행 중 재수신은 발생하지 않는다.
+      Timeout: 300
       MemorySize: 1024
       Environment:
         Variables:
