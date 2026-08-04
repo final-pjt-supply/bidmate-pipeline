@@ -7,7 +7,7 @@ pages는 포맷마다 '단위'가 다르다 — pdf는 원본 페이지 그대�
 
 AWS 의존성이 없는 순수 로직 계층이라 로컬에서 직접 테스트한다.
 """
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class PageText(TypedDict):
@@ -19,3 +19,5 @@ class ExtractResult(TypedDict):
     source_type: str          # "pdf" | "hwp" | "hwpx"
     pages: list[PageText]
     images: dict               # img_id -> 위치/참조 정보 (내부용, 최종 출력엔 안 실림)
+    # 추출기가 중간에 죽어 본문 일부만 회수된 경우에만 True (현재는 hwp만 발생).
+    partial: NotRequired[bool]

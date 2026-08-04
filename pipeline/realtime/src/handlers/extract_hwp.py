@@ -43,7 +43,9 @@ def _process(bucket: str, key: str) -> None:
     try:
         raw_bytes = s3.get_object(bucket, key)
         extracted = router.dispatch(raw_bytes, key)
-        result = build_result(bid_id, document_id, extracted["pages"])
+        result = build_result(
+            bid_id, document_id, extracted["pages"], partial=extracted.get("partial", False),
+        )
 
         s3.put_object(bucket, extracted_key, json.dumps(result, ensure_ascii=False).encode("utf-8"))
         sqs.send_to_next_queue({"bucket": bucket, "key": extracted_key})
