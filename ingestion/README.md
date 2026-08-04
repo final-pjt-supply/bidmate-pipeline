@@ -373,6 +373,38 @@ DAG는 `bidding_daily_pipeline`이며 `*/5 * * * *` 스케줄이다. DAG가 UI �
   쓰는 규약(`pipeline/backfill/requirements.txt` 등)을 따른 것이며, 루트 파일을 양쪽이
   고치지 않게 되어 main과의 병합 충돌이 사라졌다. `Dockerfile`도 하드코딩 대신 이 파일을 읽는다.
 
+### 수집 생존 감시 — dead man's switch (2026-08-04)
+
+- 기존 감시는 두 겹이었다. DLQ 알람(메시지가 흐르다 실패)과 Airflow 자체 감지
+  (Airflow가 **살아 있을 때**의 문제). 구멍은 Airflow 자체가 죽는 경우다 — EC2 장애,
+  디스크 풀, docker 데몬 사망, 스케줄러 행. 이때는 DAG이 아예 안 돌아 S3에 새 파일이
+  없고 → SQS가 비고 → DLQ도 비어서 모든 대시보드가 평화롭다.
+  **"정상"과 "수집 사망"이 모니터링상 구분되지 않았다.**
+- 장애 유형별 감지를 쌓는 대신 **정상 동작의 증거가 사라지는 것**을 잡기로 했다.
+  `mark_success`에 도달했다는 것은 그 사이클이 수집·다운로드까지 끝냈다는 뜻이므로,
+  여기서 CloudWatch 커스텀 메트릭 `Bidmate/Ingestion` / `PipelineHeartbeat`(값 1)를 찍는다
+  (`heartbeat.py`). 원인이 무엇이든 수집이 멈추면 이 신호가 끊기므로 원인 목록이 필요 없다.
+- 감시 주체를 EC2 밖에 둔다. Grafana는 같은 EC2에 있어 함께 죽으므로 쓸 수 없고,
+  Airflow Variable `bidding_daily_last_success_at`도 Airflow 안에서만 읽혀 같은 이유로
+  탈락했다. CloudWatch 알람은 AWS 관리형이라 EC2가 통째로 죽어도 살아 있다.
+- 알람은 `ingestion/monitoring/template.yaml`(별도 CloudFormation 스택)에 둔다.
+  기존 알람 9개는 `pipeline/realtime/template.yaml`에 있으나, 그 스택은 재배포 시
+  DryRun·비밀값·이미지 digest 등 파라미터를 다시 정확히 넘겨야 하고 하나라도 빠뜨리면
+  병합 배치가 조용히 dry-run으로 돌아간다. 감시 하나 붙이자고 감수할 위험이 아니다.
+- 임계값은 `Period=300`, `EvaluationPeriods=3`, `DatapointsToAlarm=3`,
+  **`TreatMissingData=breaching`**. 5분 × 3사이클 연속이라 1사이클 지연·실패로는 울리지
+  않고, 검출은 수집 중단 후 약 16~18분이다(gap 자동 복구 한도 30분 안).
+  기존 알람 9개가 전부 `notBreaching`인 것과 정반대이며, 그 한 줄이 이 알람의 전부다.
+- 복구 알림은 `OKActions`로 같은 SNS 토픽에 보낸다 — 정상 복귀를 사람이 확인하러
+  가지 않아도 된다.
+- 하트비트 발신이 실패해도 태스크는 성공 처리한다. 실패시키면 `on_failure_callback`이
+  실재하지 않는 gap을 manifest에 남기고, 어차피 메트릭이 안 올라가 알람은 정상적으로
+  울린다(fail-safe).
+- **계획 정비로 DAG을 멈출 때는 알람 액션을 먼저 끈다:**
+  `aws cloudwatch disable-alarm-actions --alarm-names ingestion-daily-pipeline-heartbeat-missing`
+  → 작업 → `enable-alarm-actions`. 오탐이 반복되면 알람을 무시하게 되고,
+  그러면 감시 체계 자체가 죽는다.
+
 ## 9. 다음 로드맵
 
 - daily 파이프라인의 비동기 전환 검토
