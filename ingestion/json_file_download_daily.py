@@ -194,9 +194,17 @@ def _expand_archive(
         if problem:
             return [_skipped(f"압축 해제 보류: {problem}")]
 
-        members = archive_rules.select_zip_members(infos)
+        members, rejected = archive_rules.select_zip_members(archive)
+        for drop in rejected:
+            logger.info("압축 멤버 제외: %s — %s", drop["name"], drop["reason"])
+            rows.append({
+                **metadata,
+                "fileName": drop["name"],
+                "zipSourceFileName": metadata.get("fileName"),
+                **_skipped(f"압축 멤버 제외: {drop['reason']}"),
+            })
         if not members:
-            return [_skipped("압축 안에 지원 확장자(hwpx/hwp/pdf) 파일이 없습니다.")]
+            return [_skipped("압축 안에 적재할 수 있는 문서가 없습니다."), *rows]
 
         for member in members:
             member_meta = {
@@ -231,7 +239,9 @@ def _expand_archive(
         Bucket=bucket, Key=archive_key, Body=body,
         **({"ContentType": content_type} if content_type else {}),
     )
-    logger.info("압축 첨부 해제: %s -> %d개 적재", archive_key, len(rows))
+    logger.info(
+        "압축 첨부 해제: %s -> %d개 적재, %d개 제외", archive_key, len(members), len(rejected),
+    )
 
     head_row = {
         "downloadStatus": "success",
@@ -242,7 +252,9 @@ def _expand_archive(
         "downloadError": "",
         "s3Bucket": bucket,
         "s3Key": archive_key,
-        "archiveMemberCount": len(rows),
+        # 실제로 적재한 문서 수만 센다 — 제외분 행도 rows에 섞여 있어서 len(rows)를 쓰면 안 된다.
+        "archiveMemberCount": len(members),
+        "archiveRejectedCount": len(rejected),
     }
     return [head_row, *rows]
 
