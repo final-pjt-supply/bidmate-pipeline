@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 왜 이 알람이 필요한가
+#   기존 감시는 두 겹이었다 — DLQ 알람(메시지가 흐르다 실패)과 Airflow 자체 감지
+#   (Airflow가 살아 있을 때의 문제). 구멍은 Airflow 자체가 죽는 경우다: EC2 장애,
+#   디스크 풀, docker 데몬 사망, 스케줄러 행. 이때는 DAG이 아예 안 돌아 S3에 새 파일이
+#   없고 -> SQS가 비고 -> DLQ도 비어서 모든 대시보드가 평화롭다. "정상"과 "수집 사망"이
+#   모니터링상 구분되지 않았다.
+#
+#   장애 유형별 감지를 쌓는 대신 정상 동작의 증거가 사라지는 것을 잡는다(dead man's
+#   switch). 원인이 무엇이든 결과가 같으므로 원인 목록을 관리할 필요가 없다.
+#   증거를 남기는 쪽은 ingestion/heartbeat.py (DAG의 mark_success에서 호출).
+#
+# 왜 별도 스택인가
+#   기존 알람 9개는 pipeline/realtime/template.yaml(realtime 스택)에 있다. 거기에
+#   추가하면 알람 한 줄 때문에 그 스택 전체를 재배포해야 하는데, 그 스택은 재배포 시
+#   DryRun·비밀값 6개·이미지 digest 3개를 CLI로 다시 정확히 넘겨야 하고 하나라도
+#   빠뜨리면 RDS 병합 배치가 조용히 dry-run으로 돌아간다(그 템플릿 주석의 2026-07-28
+#   실사고 기록 참고). "조용한 고장을 없애는 작업"이 새 조용한 고장 경로를 만들 수는 없다.
+#
+# 배포
+#   aws cloudformation deploy \
+#     --stack-name bidmate-ingestion-monitoring \
+#     --template-file ingestion/monitoring/template.yaml \
+#     --region ap-northeast-2
+#
+# 선행 조건
+#   1. heartbeat.py가 운영 Airflow에 배포되어 메트릭이 실제로 쌓이고 있을 것.
+#      TreatMissingData=breaching이라 데이터가 없는 상태로 올리면 즉시 ALARM으로
+#      떨어져 첫날부터 오탐 메일이 온다. CloudWatch에서 데이터포인트를 눈으로 확인할 것.
+#   2. 배포 주체에 BidmateIngestionMonitoringDeploy 정책이 붙어 있을 것.
+#      aws cloudformation deploy는 체인지셋을 쓰므로 CreateStack만으로는 부족하다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+Description: >
+  수집 파이프라인 생존 감시(dead man's switch) — 알람 1개짜리 독립 스택.
+  Airflow bidding_daily_pipeline의 성공 하트비트가 15분간 끊기면 기존 SNS 토픽으로
+  알린다. EC2 장애·디스크 풀·docker 데몬 사망·스케줄러 행·연속 실패를 원인 구분 없이
+  잡는다. 자세한 배경과 배포 절차는 이 파일 상단 주석 참고.
+
+Parameters:
+  AlertsTopicArn:
+    Type: String
+    Default: arn:aws:sns:ap-northeast-2:890608337282:realtime-pipeline-alerts
+    Description: >
+      기존 알림 토픽. 이메일 구독이 이미 걸려 있어 새 채널이 필요 없다(기존 알람 9개와 동일).
+
+  DagId:
+    Type: String
+    Default: bidding_daily_pipeline
+    Description: 감시 대상 DAG. heartbeat.py가 이 값을 DagId 차원으로 찍는다.
+
+Resources:
+  IngestionHeartbeatMissingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: ingestion-daily-pipeline-heartbeat-missing
+      AlarmDescription: >
+        bidding_daily_pipeline의 성공 하트비트가 15분(5분 주기 x 3사이클) 연속 끊겼다.
+        수집이 멈췄다는 뜻이며, 원인은 알람만으로 알 수 없다 — EC2/docker/스케줄러/
+        연속 실패 어느 쪽이든 증상이 같기 때문이다. 확인 순서는 ingestion/README.md 8절 참고.
+        계획 정비로 DAG을 멈출 때는 disable-alarm-actions로 먼저 억제할 것.
+      Namespace: Bidmate/Ingestion
+      MetricName: PipelineHeartbeat
+      Dimensions:
+        - Name: DagId
+          Value: !Ref DagId
+
+      # Period는 DAG 주기와 같아야 한다. 더 짧게 잡으면(예: 60초) 5분 중 4분은
+      # 정상적으로 비어 있어 즉시 오탐한다.
+      Period: 300
+      Statistic: Sum
+
+      # 연속 2개를 요구한다(2 of 2). 1사이클 실패나 지연은 버킷 하나만 비우므로
+      # 울리지 않는다 — "한두 사이클 지연으로 오탐하지 않을 것"이 요구사항이었다.
+      #
+      # 처음에는 3/3으로 잡았다가 실측 후 낮췄다(2026-08-05). 카나리아 측정 결과:
+      #   마지막 발신 11:25:19 -> ALARM 11:51:58 = 26분 39초 (이론 15분 + 오버헤드 11분 30초)
+      # CloudWatch는 EvaluationPeriods보다 넓은 범위를 조회하고 메트릭이 멈춘 뒤에도
+      # 마지막 데이터포인트를 한동안 재평가한다(AWS 문서에 명시된 동작). 그 오버헤드가
+      # 주기 2.3개분이나 붙어, 3/3으로는 DAG의 gap 자동 복구 한도(30분)까지 여유가
+      # 3분밖에 남지 않았다 — 알림을 받고 되살려도 데이터 손실이 날 수 있는 마진이다.
+      #
+      # 2/2면 이론 10분 + 같은 오버헤드 = 약 21분으로, 30분 한도까지 9분 여유가 생긴다.
+      # 목표(15~20분)를 1분쯤 초과하지만, 1/1은 한 사이클 지연에도 울려 실전에 못 쓰므로
+      # 이것이 CloudWatch 알람으로 갈 수 있는 최선이다. 15분 이내가 꼭 필요해지면
+      # 워치독 Lambda(EventBridge 5분 주기)로 전환해야 한다 — 그때는 판정을 우리가
+      # 직접 하므로 지연이 정확히 통제된다.
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+
+      # 하트비트가 하나라도 있으면 정상. 재시도로 한 버킷에 2개가 들어와도 문제없다.
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+
+      # ★ 이 한 줄이 이 알람의 전부다.
+      # 기존 알람 9개는 전부 notBreaching("메시지가 쌓이면 나쁨" 계열이라 데이터 없음=정상)인데,
+      # 생존 감시는 정반대로 데이터 없음이 곧 장애다. 이게 없으면 알람은 ALARM이 아니라
+      # INSUFFICIENT_DATA로 가고 아무도 모른다.
+      TreatMissingData: breaching
+
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlertsTopicArn
+      # 기존 알람에는 없는 항목. 정상 복귀를 사람이 확인하러 가지 않아도 되게 한다.
+      OKActions:
+        - !Ref AlertsTopicArn
+
+Outputs:
+  AlarmName:
+    Description: 생성된 알람 이름. 정비 시 disable-alarm-actions 대상.
+    Value: !Ref IngestionHeartbeatMissingAlarm
+  MetricNamespace:
+    Description: 하트비트 메트릭 네임스페이스.
+    Value: Bidmate/Ingestion

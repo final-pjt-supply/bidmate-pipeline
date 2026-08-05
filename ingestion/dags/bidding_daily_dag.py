@@ -32,6 +32,7 @@ if PROJECT_DIR not in sys.path:
 
 from daily_stats import update_hourly_stats as write_hourly_stats
 from daily_stats import write_5min_stats
+from heartbeat import emit_heartbeat
 
 # 수집은 실제 공고 조회 창이므로 5분을 기본으로 둔다.
 COLLECT_MINUTES = int(os.environ.get("BIDDING_DAILY_COLLECT_MINUTES", "5"))
@@ -194,6 +195,11 @@ def mark_success(**context) -> None:
     plan = context["ti"].xcom_pull(task_ids="plan_window")
     Variable.set(CURSOR_VAR, plan["windowEndIso"])
     log.info("%s=%s 갱신 완료", CURSOR_VAR, plan["windowEndIso"])
+
+    # 이 지점에 도달했다 = 이번 5분 사이클이 수집·다운로드까지 끝냈다.
+    # 그 사실 자체를 CloudWatch에 남긴다. 이 신호가 15분간 끊기면 알람이 울린다
+    # (heartbeat.py 모듈 주석 참고). 발신 실패는 DAG을 실패시키지 않는다.
+    emit_heartbeat(dag_id_from(context))
 
 
 def record_failed_window(context) -> None:
