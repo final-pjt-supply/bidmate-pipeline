@@ -130,16 +130,25 @@ def file_s3_key(
     content_type: str,
     file_url: str,
     include_hour: bool = False,
+    member_no: int | None = None,
 ):
-    """Build anonymized attachment S3 key from notice id, order, doc number, and extension."""
+    """Build anonymized attachment S3 key from notice id, order, doc number, and extension.
+
+    member_no를 주면 압축 첨부에서 풀려나온 파일로 보고 `_docNN_MM` 형태로 만든다.
+    부모 docNo를 그대로 두므로 기존 첨부들의 번호가 밀리지 않고, 어느 압축에서
+    나왔는지도 키만 보고 알 수 있다. 파이프라인 쪽 키 파서(pipeline/realtime/src/
+    common/paths.py의 _RAW_KEY_RE)는 file_id를 "/가 없는 임의 문자열"로 받으므로
+    이 형태를 그대로 통과시킨다(document_id는 "doc03_01"이 된다).
+    """
     notice_dt = parse_dt(metadata.get("bidNtceDt")) or datetime.now()
     biz_div = safe_key_part(metadata.get("업무구분"), "미분류")
     bid_no = safe_key_part(metadata.get("bidNtceNo") or metadata.get("noticeId"), "공고번호없음")
     ord_part = format_ord(metadata.get("bidNtceOrd"))
     ext = guess_ext(str(metadata.get("fileName") or ""), content_type, file_url).lower()
     doc_no = int(metadata.get("docNo") or metadata.get("fileSeq") or 0)
+    doc_part = f"doc{doc_no:02d}" if member_no is None else f"doc{doc_no:02d}_{member_no:02d}"
     partition_path = f"{prefix}/biz_div={biz_div}/year={notice_dt:%Y}/month={notice_dt:%m}/day={notice_dt:%d}/"
     if include_hour:
         partition_path += f"hour={notice_dt:%H}/"
 
-    return partition_path + f"{bid_no}_{ord_part}/{bid_no}_{ord_part}_doc{doc_no:02d}{ext}"
+    return partition_path + f"{bid_no}_{ord_part}/{bid_no}_{ord_part}_{doc_part}{ext}"
