@@ -23,6 +23,11 @@ from extractors.base import ExtractResult
 logger = logging.getLogger(__name__)
 
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_BOM = b"\xef\xbb\xbf"
+
+# HWPML은 `<?xml …?>` 뒤에 DOCTYPE(내부 엔티티 선언 포함)이 오고 그다음 <HWPML>이
+# 나온다. 실측 샘플에서 루트까지 60바이트 남짓이지만 선언이 길어질 수 있어 넉넉히 본다.
+_HWPML_PROBE = 4096
 
 
 def detect_format(data: bytes, filename: str) -> str:
@@ -34,6 +39,14 @@ def detect_format(data: bytes, filename: str) -> str:
         return "hwp"
     if head[:4] == b"%PDF":
         return "pdf"
+    # HWPML(한글 XML 저장 형식, 정식 확장자 .hml). 나라장터 첨부는 .hwp 이름으로
+    # 들어오는데 내용이 OLE가 아니라 hwp5proc가 "Not an OLE2"로 죽는다. 압축 첨부를
+    # 풀기 시작하면서 실제로 유입되기 시작해(공고당 3~4개) 여기서 잡는다.
+    probe = data[:_HWPML_PROBE]
+    if probe.startswith(_BOM):
+        probe = probe[len(_BOM):]
+    if probe[:5] == b"<?xml" and b"<HWPML" in probe:
+        return "hwpml"
     return os.path.splitext(filename)[1].lower().lstrip(".")
 
 
@@ -59,6 +72,9 @@ def dispatch(data: bytes, key: str) -> ExtractResult:
     if fmt == "hwp":
         from extractors import hwp
         return hwp.extract(data)
+    if fmt == "hwpml":
+        from extractors import hwpml
+        return hwpml.extract(data)
     if fmt == "pdf":
         from extractors import pdf
         return pdf.extract(data)

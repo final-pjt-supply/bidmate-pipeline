@@ -35,6 +35,7 @@ COPY parsing/hwp_hwpx/contract.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/contract.
 COPY parsing/hwp_hwpx/common.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/common.py
 COPY parsing/hwp_hwpx/hwp_extractor.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/hwp_extractor.py
 COPY parsing/hwp_hwpx/hwpx_extractor.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/hwpx_extractor.py
+COPY parsing/hwp_hwpx/hwpml_extractor.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/hwpml_extractor.py
 COPY parsing/hwp_hwpx/json_output.py ${LAMBDA_TASK_ROOT}/parsing/hwp_hwpx/json_output.py
 
 # common/: config, paths, result, s3, sqs — pdf/hwp/hwpx handler 3개가 공유.
@@ -45,6 +46,7 @@ COPY pipeline/realtime/src/extractors/base.py ${LAMBDA_TASK_ROOT}/extractors/bas
 COPY pipeline/realtime/src/extractors/pdf.py ${LAMBDA_TASK_ROOT}/extractors/pdf.py
 COPY pipeline/realtime/src/extractors/hwp.py ${LAMBDA_TASK_ROOT}/extractors/hwp.py
 COPY pipeline/realtime/src/extractors/hwpx.py ${LAMBDA_TASK_ROOT}/extractors/hwpx.py
+COPY pipeline/realtime/src/extractors/hwpml.py ${LAMBDA_TASK_ROOT}/extractors/hwpml.py
 COPY pipeline/realtime/src/extractors/router.py ${LAMBDA_TASK_ROOT}/extractors/router.py
 # handlers/: extract_pdf/hwp/hwpx만(extract_llm.py는 Dockerfile.llm 소관).
 COPY pipeline/realtime/src/handlers/__init__.py ${LAMBDA_TASK_ROOT}/handlers/__init__.py

@@ -19,6 +19,12 @@ from extractors import router  # noqa: E402
 OLE_HEAD = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 8
 ZIP_HEAD = b"PK\x03\x04" + b"\x00" * 12
 PDF_HEAD = b"%PDF-1.7" + b"\x00" * 8
+# HWPML(한글 XML 저장 형식). 나라장터는 .hwp 이름으로 내려주는데 내용이 OLE가 아니다.
+HWPML_HEAD = (
+    b'<?xml version="1.0" encoding="utf-8"?>\n'
+    b'<!DOCTYPE HWPML [\n\t<!ENTITY nbsp\t"&#160;">\n]>\n'
+    b'<HWPML Version="2.1"><BODY><SECTION Id="0"></SECTION></BODY></HWPML>'
+)
 
 
 def test_detect_format_ole_is_hwp():
@@ -36,6 +42,31 @@ def test_detect_format_pdf_signature():
 def test_detect_format_unknown_falls_back_to_extension():
     assert router.detect_format(b"garbage!!!!!!!!", "doc.hwpx") == "hwpx"
     assert router.detect_format(b"garbage!!!!!!!!", "doc.pdf") == "pdf"
+
+
+def test_detect_format_hwpml():
+    """이름은 .hwp지만 내용은 HWPML — 확장자 폴백에 맡기면 hwp5proc가 죽는다."""
+    assert router.detect_format(HWPML_HEAD, "x.hwp") == "hwpml"
+    assert router.detect_format(b"\xef\xbb\xbf" + HWPML_HEAD, "x.hwp") == "hwpml"  # BOM
+
+
+def test_detect_format_other_xml_is_not_hwpml():
+    """HWPML이 아닌 XML까지 삼키면 안 된다 — 루트 태그까지 확인한다."""
+    assert router.detect_format(b"<?xml version='1.0'?><rss><channel/></rss>", "x.hwp") == "hwp"
+
+
+def test_dispatch_hwp_named_hwpml_content_goes_to_hwpml_extractor(monkeypatch):
+    calls = []
+    monkeypatch.setattr("extractors.hwp.extract", lambda data: calls.append("hwp"))
+    monkeypatch.setattr(
+        "extractors.hwpml.extract",
+        lambda data: calls.append("hwpml") or {"source_type": "hwpml", "pages": [], "images": {}},
+    )
+
+    result = router.dispatch(HWPML_HEAD, "raw/downloads/daily/.../R26_000_doc03_01.hwp")
+
+    assert calls == ["hwpml"]
+    assert result["source_type"] == "hwpml"
 
 
 def test_dispatch_hwpx_named_ole_content_goes_to_hwp_extractor(monkeypatch):
