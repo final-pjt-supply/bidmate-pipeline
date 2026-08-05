@@ -303,6 +303,14 @@ def determine_qual_status(
 
     - found <= 0: pending 유지(호출부는 이 경우 UPDATE 자체를 하지 않아야 함 —
       아직 아무 파일도 안 왔다는 뜻이라 갱신할 값이 없음).
+    - expected <= 0: pending 유지. "기대 문서가 0인데 산출물이 나왔다"는 개수
+      비교가 성립하지 않는 상태이지 완료가 아니다. 예전에는 found >= 0이 항상
+      참이라 첫 문서 하나에 merged로 확정됐는데, merged 행은 병합 배치가 다시
+      뽑지 않아(db.py의 대상 SELECT가 pending/partial/failed만 본다) 되돌릴 수
+      없고 그대로 조회 API에 노출된다. 압축 첨부를 풀기 시작하면서 zip이 0으로
+      잡힌 공고에서 이 경로가 실제로 열렸다 — 수집 단계는 다운로드 전이라
+      압축 안 문서 수를 모르고, 정정은 다운로드 뒤에 온다(ingestion의
+      correct_expected_counts). 그 사이 창을 여기서 막는다.
     - found >= expected: merged. found > expected(이상 케이스, expected_file_count
       가 stale할 수 있음)도 merged로 처리하되 호출부가 이 case를 별도로 로그해야
       한다(이 함수는 개수 비교만 하고 원인 로깅은 책임지지 않음).
@@ -314,7 +322,7 @@ def determine_qual_status(
       나중에 실패 갱신 로직이 붙으면 자동으로 살아난다.
     - 나머지(0 < found < expected, 실패 없음): partial — 계속 대기.
     """
-    if found_file_count <= 0:
+    if found_file_count <= 0 or expected_file_count <= 0:
         return "pending"
     if found_file_count >= expected_file_count:
         return "merged"

@@ -191,6 +191,11 @@ def test_no_documents_raises():
         (2, 1, False, "merged"),  # 이상 케이스(found > expected)도 merged
         (1, 2, False, "partial"),
         (1, 2, True, "failed"),
+        # expected=0은 "완료"가 아니라 "아직 개수를 모름"이다. 압축 첨부는 수집
+        # 단계에서 0으로 잡히고 다운로드 뒤에야 정정되는데, 그 사이에 merged로
+        # 확정되면 병합 배치가 다시 뽑지 않아 되돌릴 수 없다.
+        (1, 0, False, "pending"),
+        (3, 0, True, "pending"),
     ],
 )
 def test_determine_qual_status(found, expected, has_failed, want):
