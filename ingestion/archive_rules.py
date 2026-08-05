@@ -12,6 +12,10 @@ from attachment_rules import DOC_EXT_PRIORITY, split_ext
 
 
 ZIP_MAGIC = b"PK\x03\x04"
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+PDF_MAGIC = b"%PDF"
+XML_PROLOG = b"<?xml"
+BOM = b"\xef\xbb\xbf"
 
 # 발주기관 DRM으로 잠긴 첨부. 확장자는 .hwp인데 내용이 OLE가 아니라 벤더 컨테이너라
 # 추출기가 "Not an OLE2 Compound Binary File"로 죽고, 3회 재시도 후 DLQ에 영구 적재된다.
@@ -21,6 +25,10 @@ DRM_MAGICS = (b"SCDS",)
 
 # 첫 바이트 판별에 필요한 최소 길이. DRM_MAGICS/ZIP_MAGIC 중 가장 긴 것보다 넉넉하게.
 PEEK_BYTES = 8
+
+# 멤버 내용 판별용. HWPML은 `<?xml …?>` 뒤에 DOCTYPE이 오고 그다음 <HWPML>이라
+# 앞 8바이트로는 부족하다(라우터의 _HWPML_PROBE와 같은 이유).
+MEMBER_PROBE_BYTES = 4096
 
 # zip bomb·비정상 첨부 방어. 실측 첨부 최대가 7MB대라 넉넉히 잡아도 정상 파일은 안 걸린다.
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -49,6 +57,31 @@ def detect_payload_kind(head: bytes, file_name: str) -> str:
     return "plain"
 
 
+def detect_member_kind(head: bytes) -> str | None:
+    """압축에서 꺼낸 내용물이 추출 파이프라인이 읽을 수 있는 것인지 판정한다.
+
+    읽을 수 있으면 형식 이름, 아니면 None. 확장자는 보지 않는다 — 압축 안에는
+    이름과 내용이 어긋난 파일이 흔하다(실측: 이름은 .hwp인데 내용은 HWPML).
+    최종 판정은 어차피 추출 Lambda의 router가 같은 매직바이트로 다시 한다.
+
+    아는 형식만 통과시킨다. 모르는 것을 일단 올려두면 추출 단계에서 결정적으로
+    실패해 3회 재시도 후 DLQ에 영구 적재되고, expected_file_count에는 잡혀 있어
+    공고가 partial로 고착된다(2026-08-05 HWPML 유입 때 실제로 겪음).
+    """
+    if head.startswith(DRM_MAGICS):
+        return None
+    if head.startswith(OLE_MAGIC):
+        return "hwp"
+    if head.startswith(ZIP_MAGIC):
+        return "hwpx"
+    if head.startswith(PDF_MAGIC):
+        return "pdf"
+    probe = head[len(BOM):] if head.startswith(BOM) else head
+    if probe.startswith(XML_PROLOG) and b"<HWPML" in probe:
+        return "hwpml"
+    return None
+
+
 def decode_member_name(info: zipfile.ZipInfo) -> str:
     """zip 멤버 이름을 사람이 읽을 수 있는 형태로 되돌린다.
 
@@ -69,19 +102,27 @@ def _is_junk(name: str) -> bool:
     return any(part in name for part in _MACOS_JUNK) or name.endswith("/")
 
 
-def select_zip_members(infos: list[zipfile.ZipInfo]) -> list[dict[str, Any]]:
-    """zip 안에서 실제로 적재할 멤버만 고른다.
+def select_zip_members(archive: zipfile.ZipFile) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """zip 안에서 실제로 적재할 멤버를 고른다. 반환은 (적재분, 제외분).
 
-    적용 규칙은 attachment_rules.apply_dedup()과 같은 계열이다:
+    세 단계로 거른다:
     1. 지원 확장자(hwpx/hwp/pdf)가 아니면 제외 — 추출 파이프라인이 못 다룬다.
-    2. 같은 stem이 여러 확장자로 들어 있으면 hwpx > hwp > pdf 중 하나만.
-    이 규칙을 여기서도 지켜야 expected_file_count(= 실제 적재 개수)가 어긋나지 않는다.
+    2. 같은 stem이 여러 확장자로 들어 있으면 hwpx > hwp > pdf 중 하나만
+       (attachment_rules.apply_dedup()과 같은 규칙).
+    3. **내용 검사** — 앞부분 매직바이트가 아는 형식이 아니면 제외.
+       확장자가 맞아도 내용이 DRM이거나 정체불명이면 여기서 걸러진다.
 
-    반환 순서는 zip 안의 순서를 따르고, 각 원소에 1부터의 memberNo를 붙인다.
-    이 번호가 S3 키의 `_docNN_MM`이 되므로 같은 zip을 다시 풀어도 같은 키가 나온다.
+    3번이 없으면 압축 바깥 첨부에만 검사가 걸리고 안쪽은 무사통과가 된다.
+    실제로 그 구멍으로 HWPML이 들어와 공고당 3~4개씩 영구 실패했다(2026-08-05).
+
+    제외분도 사유와 함께 돌려준다 — 호출부가 manifest에 남겨야 "이 공고에 문서가
+    있었지만 못 받았다"가 추적된다(다운로드 단계의 dedupDropped와 같은 관례).
+
+    적재분에는 1부터의 memberNo를 붙인다. 이 번호가 S3 키의 `_docNN_MM`이 되므로
+    같은 zip을 다시 풀어도 같은 키가 나온다.
     """
-    candidates = []
-    for info in infos:
+    candidates, rejected = [], []
+    for info in archive.infolist():
         if info.is_dir():
             continue
         name = decode_member_name(info)
@@ -90,6 +131,7 @@ def select_zip_members(infos: list[zipfile.ZipInfo]) -> list[dict[str, Any]]:
         base = name.rsplit("/", 1)[-1]
         stem, ext = split_ext(base)
         if not stem or ext not in DOC_EXT_PRIORITY:
+            rejected.append({"name": base, "reason": f"지원하지 않는 확장자({ext or '없음'})"})
             continue
         candidates.append({"info": info, "name": base, "stem": stem, "ext": ext})
 
@@ -101,14 +143,30 @@ def select_zip_members(infos: list[zipfile.ZipInfo]) -> list[dict[str, Any]]:
     selected = []
     for c in candidates:
         if DOC_EXT_PRIORITY.index(c["ext"]) > best[c["stem"]]:
+            rejected.append({
+                "name": c["name"],
+                "reason": f"같은 이름의 {DOC_EXT_PRIORITY[best[c['stem']]]} 문서를 우선 적재",
+            })
             continue
+
+        with archive.open(c["info"]) as fh:
+            head = fh.read(MEMBER_PROBE_BYTES)
+        kind = detect_member_kind(head)
+        if kind is None:
+            rejected.append({
+                "name": c["name"],
+                "reason": f"추출할 수 없는 내용(DRM이거나 미지원 형식, 선두 {head[:8]!r})",
+            })
+            continue
+
+        c["kind"] = kind
         selected.append(c)
         if len(selected) >= MAX_MEMBERS:
             break
 
     for number, member in enumerate(selected, start=1):
         member["memberNo"] = number
-    return selected
+    return selected, rejected
 
 
 def guard_archive(infos: list[zipfile.ZipInfo]) -> str | None:

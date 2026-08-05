@@ -78,6 +78,14 @@ class FakeS3:
         return _Pager(self.objects)
 
 
+# 내용 검사를 통과하려면 진짜 매직바이트가 필요하다(확장자만으로는 안 뚫린다).
+OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 56
+PDF = b"%PDF-1.7\n" + b"\x00" * 32
+HWPML = (b'<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE HWPML []>\n'
+         b'<HWPML Version="2.1"><BODY><SECTION Id="0"/></BODY></HWPML>')
+DRM = b"SCDSA004" + b"\x00" * 56
+
+
 def make_zip(names_to_bytes: dict, utf8_flag: bool = True) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -135,19 +143,45 @@ def test_utf8_플래그가_있으면_그대로_쓴다():
     assert archive_rules.decode_member_name(info) == "설계설명서.hwp"
 
 
+def _members(mapping):
+    archive = zipfile.ZipFile(io.BytesIO(make_zip(mapping)))
+    return archive_rules.select_zip_members(archive)
+
+
 def test_멤버_선별은_지원확장자와_우선순위를_따른다():
-    infos = zipfile.ZipFile(
-        io.BytesIO(
-            make_zip({
-                "설명서.hwp": b"a", "설명서.pdf": b"b",   # 같은 stem -> hwp만
-                "내역서.hwpx": b"c",
-                "사진.jpg": b"d", "목록.xlsx": b"e",      # 미지원 -> 제외
-                "__MACOSX/._설명서.hwp": b"f",            # 잡파일 -> 제외
-            })
-        )
-    ).infolist()
-    picked = archive_rules.select_zip_members(infos)
+    picked, dropped = _members({
+        "설명서.hwp": OLE, "설명서.pdf": PDF,      # 같은 stem -> hwp만
+        "내역서.hwpx": make_zip({"a": b"x"}),
+        "사진.jpg": b"d", "목록.xlsx": b"e",       # 미지원 확장자 -> 제외
+        "__MACOSX/._설명서.hwp": OLE,              # 잡파일 -> 제외
+    })
     assert [(m["name"], m["memberNo"]) for m in picked] == [("설명서.hwp", 1), ("내역서.hwpx", 2)]
+    assert {d["name"] for d in dropped} == {"사진.jpg", "목록.xlsx", "설명서.pdf"}
+
+
+def test_압축_안_내용물도_바깥과_똑같이_내용_검사를_받는다():
+    """확장자만 보면 압축 안이 무사통과가 된다 — 실제로 그 구멍으로 HWPML이 들어왔다."""
+    picked, dropped = _members({
+        "정상.hwp": OLE,
+        "잠긴문서.hwp": DRM,          # 이름은 멀쩡한데 내용이 DRM
+        "정체불명.hwp": b"\x00" * 64,  # 아는 형식이 아님
+        "예규.hwp": HWPML,            # 이름은 .hwp인데 내용은 HWPML -> 읽을 수 있으니 통과
+    })
+    assert [m["name"] for m in picked] == ["정상.hwp", "예규.hwp"]
+    assert [m["kind"] for m in picked] == ["hwp", "hwpml"]
+    assert {d["name"] for d in dropped} == {"잠긴문서.hwp", "정체불명.hwp"}
+    assert all("추출할 수 없는 내용" in d["reason"] for d in dropped)
+
+
+def test_내용_판별은_아는_형식만_통과시킨다():
+    assert archive_rules.detect_member_kind(OLE) == "hwp"
+    assert archive_rules.detect_member_kind(PDF) == "pdf"
+    assert archive_rules.detect_member_kind(b"PK\x03\x04...") == "hwpx"
+    assert archive_rules.detect_member_kind(HWPML) == "hwpml"
+    assert archive_rules.detect_member_kind(b"\xef\xbb\xbf" + HWPML) == "hwpml"   # BOM
+    assert archive_rules.detect_member_kind(DRM) is None
+    assert archive_rules.detect_member_kind(b"<?xml version='1.0'?><rss/>") is None
+    assert archive_rules.detect_member_kind(b"") is None
 
 
 def test_압축_해제_총량_상한(monkeypatch):
@@ -166,15 +200,29 @@ def test_멤버_키는_부모_docNo를_유지한다():
 
 def test_zip은_풀어서_멤버만_적재하고_행이_늘어난다():
     s3 = FakeS3()
-    body = make_zip({"설명서.hwp": b"HWP", "사진.jpg": b"X"})
+    body = make_zip({"설명서.hwp": OLE, "사진.jpg": b"X"})
     rows = dl.upload_attachment(s3, "bidmate", FakeSession(body), meta(), 10, skip_existing=False)
 
-    assert len(rows) == 2                       # 원본 zip 행 + 멤버 1행
+    uploaded = [r for r in rows if r.get("s3Key")]
     assert rows[0]["archiveMemberCount"] == 1
-    assert rows[1]["s3Key"].endswith("_doc03_01.hwp")
-    assert s3.objects[rows[1]["s3Key"]] == b"HWP"
+    member = next(r for r in uploaded if r["s3Key"].endswith("_doc03_01.hwp"))
+    assert s3.objects[member["s3Key"]] == OLE
+    # 제외된 멤버도 사유와 함께 manifest에 남는다
+    assert any("사진.jpg" == r.get("fileName") and r["downloadStatus"] == "skipped" for r in rows)
     # 멤버를 먼저 올리고 zip 원본을 마지막에 올려야 중간 실패가 자가 치유된다
     assert s3.puts[-1].endswith("_doc03.zip")
+
+
+def test_zip_안_DRM은_적재되지_않는다():
+    s3 = FakeS3()
+    body = make_zip({"정상.hwp": OLE, "잠긴문서.hwp": DRM})
+    rows = dl.upload_attachment(s3, "bidmate", FakeSession(body), meta(), 10, skip_existing=False)
+
+    assert not any("잠긴문서" in k for k in s3.puts)
+    assert rows[0]["archiveMemberCount"] == 1
+    dropped = next(r for r in rows if r.get("fileName") == "잠긴문서.hwp")
+    assert dropped["downloadStatus"] == "skipped"
+    assert "추출할 수 없는 내용" in dropped["downloadError"]
 
 
 class _DripRaw(_Raw):
@@ -189,15 +237,15 @@ class _DripRaw(_Raw):
 
 def test_찔끔_반환하는_스트림에서도_zip이_안_잘린다():
     s3 = FakeS3()
-    body = make_zip({"설명서.hwp": b"HWP" * 500})
+    body = make_zip({"설명서.hwp": OLE + b"BODY" * 500})
     session = FakeSession(body)
     session.get = lambda url, stream=True, timeout=None: type(
         "R", (), {"raw": _DripRaw(body), "headers": {}, "raise_for_status": lambda self: None}
     )()
 
     rows = dl.upload_attachment(s3, "bidmate", session, meta(), 10, skip_existing=False)
-    assert rows[1]["s3Key"].endswith("_doc03_01.hwp")
-    assert s3.objects[rows[1]["s3Key"]] == b"HWP" * 500
+    member = next(r for r in rows if str(r.get("s3Key", "")).endswith("_doc03_01.hwp"))
+    assert s3.objects[member["s3Key"]] == OLE + b"BODY" * 500
 
 
 def test_압축_원본_크기_상한을_넘으면_건너뛴다(monkeypatch):
