@@ -147,13 +147,15 @@ Parameters:
   # ============================================================
   MergeImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:b2557430e2c97f2cace724bd1461fded0cf89c7d0add1a9c22eed7b23f129ce0
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:c367ef605831a1bacc49fb86b022aef73871187a62224433c20d5c660d4c00b8
     Description: >
-      RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). 2026-07-14 #75
-      대응(required_certs 타입 정정 + rollback + 회당 상한, 커밋 4f41e94)
-      빌드/푸시로 digest 갱신됨. :latest 금지 — CloudFormation이 태그 변경을
-      감지 못해 이미지가 바뀌어도 재배포가 안 될 수 있다. 이후 이미지를
-      다시 빌드/푸시할 때마다 이 Default를 새 digest로 갱신할 것.
+      RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). :latest 금지 —
+      CloudFormation이 태그 변경을 감지 못해 이미지가 바뀌어도 재배포가 안 될 수
+      있다. 이후 이미지를 다시 빌드/푸시할 때마다 이 Default를 새 digest로 갱신할 것.
+      현재 digest는 2026-08-05 푸시분(태그 zipfix) — expected_file_count가 0일 때
+      merged 대신 pending을 유지하는 수정(merge/logic.py)이 들어간 이미지.
+      압축 첨부 해제를 켜기 전에 반드시 이 이미지가 배포돼 있어야 한다.
+      직전 값은 2026-07-14 푸시분(sha256:b2557430…, #75 대응 커밋 4f41e94).
 
   MergeDbHost:
     Type: String
