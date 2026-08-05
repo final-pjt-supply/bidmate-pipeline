@@ -17,7 +17,10 @@ capabilities = "CAPABILITY_NAMED_IAM"
 # 2026-07-28: 이미지 3종을 :latest -> digest 고정으로 변경. :latest가 7/09~7/11에
 # 멈춰 있어 그대로 배포하면 실제 운영 함수 4개가 옛 코드로 롤백되는 상태였다.
 # 새 이미지를 푸시하면 여기와 template.yaml의 Default를 함께 갱신할 것.
-parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:a7c2f96ccfc335b0f8c337c542ca3bfae6b70e046f61e6cd9039d053b1d0769e\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:b2557430e2c97f2cace724bd1461fded0cf89c7d0add1a9c22eed7b23f129ce0\" TagMaxPerRun=\"500\""
+#
+# 2026-08-05: ExtractorImageUri를 PR #111 머지분 이미지(태그 pr111)로 갱신.
+# a7c2f96c(7/14) -> 58c12324. 나머지 이미지 3종은 그대로다.
+parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:58c123243ba590e04deff4534f99d97570f961f0b22155ff23e26c3df1480bf2\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:b2557430e2c97f2cace724bd1461fded0cf89c7d0add1a9c22eed7b23f129ce0\" TagMaxPerRun=\"500\""
 image_repositories = []
 
 [default.global.parameters]

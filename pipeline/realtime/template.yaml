@@ -24,10 +24,12 @@ Parameters:
   # 태그만 옮기고 여기를 안 고치면 같은 사고가 반복된다.
   ExtractorImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:a7c2f96ccfc335b0f8c337c542ca3bfae6b70e046f61e6cd9039d053b1d0769e
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:58c123243ba590e04deff4534f99d97570f961f0b22155ff23e26c3df1480bf2
     Description: >
       pdf/hwp/hwpx 추출 Lambda 3개가 공유하는 이미지(ECR). CMD만 함수별로 다르게 오버라이드.
-      현재 digest는 2026-07-14 푸시분(태그 78) — 배포 중인 값과 동일.
+      현재 digest는 2026-08-05 푸시분(태그 pr111, PR #111 머지분 24b8946) —
+      HWP 추출 실패 사유 전파·부분 추출 보존이 들어간 이미지.
+      직전 값은 2026-07-14 푸시분(sha256:a7c2f96c…).
 
   LlmImageUri:
     Type: String
