@@ -27,6 +27,11 @@ PROJECT_DIR = os.environ.get("BIDDING_AGENT_HOME", str(Path(__file__).resolve().
 PYTHON_BIN = os.environ.get("BIDDING_AGENT_PYTHON", "python")
 BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "bidmate")
 
+# RDS 적재 스크립트는 ingestion/이 아니라 db/에 있다. 절대경로로 넘기면 subprocess의 cwd와
+# 무관하게 실행되고, 스크립트 파일 자체의 위치 기준으로 sys.path가 잡혀 import도 그대로 된다.
+DB_DIR = os.environ.get("BIDDING_AGENT_DB_HOME", str(Path(PROJECT_DIR).parent / "db"))
+RDS_LOAD_SCRIPT = str(Path(DB_DIR) / "load_curated_daily_to_rds.py")
+
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
 
@@ -49,6 +54,13 @@ GAP_MANIFEST_PREFIX = os.environ.get(
     "BIDDING_DAILY_GAP_MANIFEST_PREFIX",
     "raw/downloads/daily/_metadata/gaps",
 )
+
+# 수집 커서(CURSOR_VAR)와 일부러 분리한다. RDS 적재가 실패해도 수집 커서는 그대로 전진하는데,
+# 같은 커서를 쓰면 실패한 구간이 "이미 지나간 것"으로 취급되어 다시는 RDS에 안 들어간다.
+# 별도 커서를 두면 RDS 적재 실패 시 커서가 안 움직이고, 다음 실행이 그 구간을 자동으로
+# 다시 처리한다(self-healing) — 외부 API 호출 예산 문제가 아니라 우리 S3를 다시 읽는
+# 것뿐이라 재시도 비용이 낮아서, 수집 단계 같은 gap-threshold 로직도 필요 없다.
+RDS_CURSOR_VAR = os.environ.get("BIDDING_DAILY_RDS_CURSOR_VAR", "bidding_daily_rds_last_success_at")
 
 log = logging.getLogger("bidding-daily-dag")
 
@@ -202,6 +214,32 @@ def mark_success(**context) -> None:
     emit_heartbeat(dag_id_from(context))
 
 
+def load_daily_to_rds(**context) -> dict:
+    """curated daily JSON 중 RDS 커서 이후 갱신된 것만 골라 bid_table/bid_attachments에 적재한다.
+
+    until은 이번 실행의 수집 창 끝(plan.windowEndIso)으로 고정한다 — RDS 적재가 수집보다
+    앞서 나가서 "아직 이번 DAG run이 수집하지 않은" 미래 구간을 걸러버리는 걸 막기 위함이다.
+    """
+    plan = context["ti"].xcom_pull(task_ids="plan_window")
+    since_iso = Variable.get(RDS_CURSOR_VAR, default_var=None) or plan["cursorIso"]
+    until_iso = plan["windowEndIso"]
+    run_script(RDS_LOAD_SCRIPT, "--since", since_iso, "--until", until_iso, "--yes")
+    return {"sinceIso": since_iso, "untilIso": until_iso}
+
+
+def mark_rds_success(**context) -> None:
+    result = context["ti"].xcom_pull(task_ids="load_daily_to_rds")
+    Variable.set(RDS_CURSOR_VAR, result["untilIso"])
+    log.info("%s=%s 갱신 완료", RDS_CURSOR_VAR, result["untilIso"])
+
+
+def record_rds_load_failure(context) -> None:
+    # 수집 실패(record_failed_window)와 달리 manifest는 안 남긴다: RDS 커서가 전진하지 않은
+    # 채로 남아있는 것 자체가 "다시 처리해야 할 구간" 표시이고, 우리 S3를 다시 읽는 재시도라
+    # 비용도 낮다. Airflow 로그/재시도 이력만으로 추적하기에 충분하다.
+    log.error("load_daily_to_rds 실패 — RDS 커서(%s) 미전진, 다음 실행이 자동 재시도함", RDS_CURSOR_VAR)
+
+
 def record_failed_window(context) -> None:
     ti = context["ti"]
     plan = ti.xcom_pull(task_ids="plan_window") or {}
@@ -281,6 +319,19 @@ with DAG(**dag_kwargs) as dag:
         python_callable=mark_success,
     )
 
+    load_daily_to_rds_task = PythonOperator(
+        task_id="load_daily_to_rds",
+        python_callable=load_daily_to_rds,
+        on_failure_callback=record_rds_load_failure,
+    )
+
+    mark_rds_success_task = PythonOperator(
+        task_id="mark_rds_success",
+        python_callable=mark_rds_success,
+    )
+
     plan_daily_window >> collect_daily_notices_task >> download_daily_files_task
     download_daily_files_task >> mark_daily_success
     download_daily_files_task >> update_5min_stats_task >> update_hourly_stats_task
+    # RDS 적재는 수집 커서(mark_success)와 독립된 별도 흐름이라 병렬로 둔다.
+    download_daily_files_task >> load_daily_to_rds_task >> mark_rds_success_task
