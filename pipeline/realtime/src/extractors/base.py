@@ -16,7 +16,7 @@ class PageText(TypedDict):
 
 
 class ExtractResult(TypedDict):
-    source_type: str          # "pdf" | "hwp" | "hwpx"
+    source_type: str          # "pdf" | "hwp" | "hwpx" | "hwpml"
     pages: list[PageText]
     images: dict               # img_id -> 위치/참조 정보 (내부용, 최종 출력엔 안 실림)
     # 추출기가 중간에 죽어 본문 일부만 회수된 경우에만 True (현재는 hwp만 발생).

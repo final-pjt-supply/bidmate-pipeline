@@ -11,10 +11,16 @@ from parsing.hwp_hwpx.contract import ExtractResult  # 타입 힌트용(읽기�
 logger = logging.getLogger(__name__)
 
 _OLE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_BOM = b"\xef\xbb\xbf"
+_HWPML_PROBE = 4096
 
 
 def _detect_format(data: bytes, filename: str) -> str:
-    """매직바이트로 실제 포맷 판정, 불명 시 확장자 폴백."""
+    """매직바이트로 실제 포맷 판정, 불명 시 확장자 폴백.
+
+    ⚠ pipeline/realtime/src/extractors/router.py의 detect_format과 동일 로직 —
+    한쪽을 고치면 다른 쪽도 확인할 것(별도 Lambda·별도 이미지라 의도적으로 중복 유지).
+    """
     head = data[:8]
     if head[:4] == b"PK\x03\x04":
         return "hwpx"
@@ -22,6 +28,12 @@ def _detect_format(data: bytes, filename: str) -> str:
         return "hwp"
     if head[:4] == b"%PDF":
         return "pdf"
+    # HWPML(한글 XML 저장 형식). 파일명이 .hwp인데 내용이 XML이라 hwp5proc가 죽는다.
+    probe = data[:_HWPML_PROBE]
+    if probe.startswith(_BOM):
+        probe = probe[len(_BOM):]
+    if probe[:5] == b"<?xml" and b"<HWPML" in probe:
+        return "hwpml"
     return os.path.splitext(filename)[1].lower().lstrip(".")
 
 
@@ -36,6 +48,9 @@ def extract_document(data: bytes, filename: str, describe_fn=None) -> ExtractRes
     if fmt == "hwp":
         from parsing.hwp_hwpx.hwp_extractor import extract_hwp
         return extract_hwp(data, describe_fn=describe_fn)
+    if fmt == "hwpml":
+        from parsing.hwp_hwpx.hwpml_extractor import extract_hwpml
+        return extract_hwpml(data, describe_fn=describe_fn)
     if fmt == "pdf":
         from backfill_lambda.pdf_extractor import extract_pdf
         return extract_pdf(data, describe_fn=describe_fn)
