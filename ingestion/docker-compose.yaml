@@ -37,12 +37,23 @@ x-airflow-common: &airflow-common
     STATS_DB_SSLMODE: ${STATS_DB_SSLMODE:-require}
     # AWS 자격증명은 EC2 IAM 역할(instance profile)로 자동 주입 — 키를 넣지 말 것.
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+    # ── RDS 증분 적재 (load_daily_to_rds 태스크) ──
+    # db/는 ingestion/의 형제 디렉터리라 이 compose의 마운트(`.`) 밖에 있다.
+    # 아래 volumes에서 ../db를 /opt/db로 따로 마운트한다 — DAG의 기본값
+    # Path(BIDDING_AGENT_HOME).parent / "db" 가 정확히 /opt/db로 풀리지만,
+    # 경로가 조용히 어긋나면 태스크가 "파일 없음"으로만 죽으므로 명시해 둔다.
+    BIDDING_AGENT_DB_HOME: /opt/db
+    # 서비스 RDS 접속 문자열(psycopg). 위 STATS_DB_*와 같은 DB를 가리키지만
+    # 형식이 달라 둘 다 필요하다 — 통합은 별건으로 다룬다.
+    DATABASE_URL: ${DATABASE_URL}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     # repo 전체를 마운트 — DAG가 여기서 python raw_json_daily.py 등을 실행한다.
     - .:/opt/bidding-agent
+    # RDS 적재 스크립트는 레포 루트의 db/에 있다(위 BIDDING_AGENT_DB_HOME 주석 참고).
+    - ../db:/opt/db
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends
     postgres:

@@ -1,5 +1,7 @@
-httpx>=0.28        # 조달청 API 비동기 호출 + 첨부 다운로드(backfill)
-requests>=2.32     # daily 수집의 동기 호출
-boto3>=1.40        # S3 업로드 + head_object 멱등성 검사
-aioboto3>=15.5     # backfill 첨부 업로드 동시성
-python-dotenv>=1.0 # G2B_SERVICE_KEY 등 로컬 실행용 .env 로드
+httpx>=0.28          # 조달청 API 비동기 호출 + 첨부 다운로드(backfill)
+requests>=2.32       # daily 수집의 동기 호출
+boto3>=1.40          # S3 업로드 + head_object 멱등성 검사
+aioboto3>=15.5       # backfill 첨부 업로드 동시성
+python-dotenv>=1.0   # G2B_SERVICE_KEY 등 로컬 실행용 .env 로드
+psycopg[binary]>=3.2 # RDS 접속 — load_curated_daily_to_rds.py, bid_stats_refresh DAG
+tqdm>=4.66           # RDS 적재 진행 표시
