@@ -30,7 +30,12 @@ capabilities = "CAPABILITY_NAMED_IAM"
 # ⚠ 이 배포가 Airflow의 압축 첨부 해제(ingestion)보다 먼저여야 한다 — 순서가 바뀌면
 # 기대 문서 수가 0인 채로 문서가 생겨 공고가 조기에 merged로 확정되고, merged 행은
 # 병합 배치가 다시 뽑지 않아 되돌릴 수 없다.
-parameter_overrides = "ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:3a8cdb7562aa27b9ea2744a52712fb4d814d6079d1346dc7cdeba5fb458a26ec\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:c367ef605831a1bacc49fb86b022aef73871187a62224433c20d5c660d4c00b8\" TagMaxPerRun=\"500\""
+#
+# 2026-08-06: MergeImageUri를 태그 noattach 이미지로 갱신. c367ef60 -> 3269e86d.
+# 첨부가 아예 없는 공고를 pending에서 no_attachment로 빼내는 스윕이 들어갔다
+# (merge/db.sweep_no_attachment). 무첨부 공고는 산출물이 안 생겨 daily 인벤토리
+# 필터에 매번 걸러지고, 그래서 병합 대상이 되지 못한 채 pending에 영구히 고인다.
+parameter_overrides ="ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:3a8cdb7562aa27b9ea2744a52712fb4d814d6079d1346dc7cdeba5fb458a26ec\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:3269e86d296735bf5f516116de5bb36ccdbbd9af922aa713b3ebcd28db850092\" TagMaxPerRun=\"500\""
 image_repositories = []
 
 [default.global.parameters]
