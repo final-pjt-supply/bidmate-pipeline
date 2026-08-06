@@ -53,6 +53,9 @@ def patch_config_and_connection(monkeypatch):
     # 소관이라 여기서는 꺼둔다 — 켜두면 FakeConn에 cursor가 없어 스윕이 예외로
     # 빠지고, 그 안의 conn.rollback()이 rollback_calls를 오염시킨다.
     monkeypatch.setattr(db, "bid_tags_available", lambda conn: False)
+    # 같은 이유로 첨부 없는 공고 스윕도 기본은 꺼둔다 — 이 스윕은 아래 전용
+    # 테스트에서만 켠다.
+    monkeypatch.setattr(db, "sweep_no_attachment", lambda conn, dry_run: 0)
 
 
 def test_no_targets_short_circuits_without_building_inventory(monkeypatch):
@@ -318,9 +321,64 @@ def test_zero_daily_matched_logs_no_targets_and_returns_zero_summary(monkeypatch
         result = handler.lambda_handler({}, None)
 
     assert result == {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                       "tagged": 0, "conflict_bid_ids": [], "error_bid_ids": []}
+                       "tagged": 0, "no_attachment": 0,
+                       "conflict_bid_ids": [], "error_bid_ids": []}
     assert apply_merge_calls == []
     assert any("MERGE_NO_TARGETS db_total=2" in r.message for r in caplog.records)
+
+
+def test_no_attachment_sweep_runs_before_target_selection(monkeypatch, caplog):
+    """첨부 없는 공고를 먼저 빼내야 그 행이 이번 회차 대상 목록에 안 섞인다."""
+    order = []
+    monkeypatch.setattr(db, "sweep_no_attachment",
+                         lambda conn, dry_run: (order.append("sweep"), 7)[1])
+
+    def fetch(conn):
+        order.append("fetch")
+        return []
+
+    monkeypatch.setattr(db, "fetch_merge_targets", fetch)
+
+    with caplog.at_level("INFO"):
+        result = handler.lambda_handler({}, None)
+
+    assert order == ["sweep", "fetch"]
+    assert result["no_attachment"] == 7
+    assert any("NO_ATTACHMENT_SWEEP count=7" in r.message for r in caplog.records)
+
+
+def test_no_attachment_sweep_passes_dry_run_from_config(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(db, "sweep_no_attachment",
+                         lambda conn, dry_run: (seen.update(dry_run=dry_run), 0)[1])
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [])
+
+    handler.lambda_handler({}, None)
+
+    assert seen == {"dry_run": True}   # FAKE_CONFIG의 dry_run이 그대로 전달돼야 함
+
+
+def test_no_attachment_sweep_failure_does_not_stop_batch(monkeypatch):
+    """스윕이 죽어도 자격요건 병합은 계속돼야 한다 — 이 스윕은 부가 기능이다."""
+    fake_conn = FakeConn()
+    monkeypatch.setattr(db, "get_connection", lambda config: fake_conn)
+    monkeypatch.setattr(db, "sweep_no_attachment",
+                         lambda conn, dry_run: (_ for _ in ()).throw(RuntimeError("DB 장애")))
+    target = _target()
+    monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [target])
+    monkeypatch.setattr(inventory, "build_inventory", lambda bucket: {target["bid_id"]: ["ref1"]})
+    monkeypatch.setattr(inventory, "fetch_documents", lambda bucket, refs: [{"bid_id": target["bid_id"]}])
+    monkeypatch.setattr(handler, "merge_qualification_documents",
+                         lambda bid_id, docs: {"merge_conflicts": None})
+    monkeypatch.setattr(db, "has_failed_attachment", lambda conn, no, ord_: False)
+    monkeypatch.setattr(handler, "determine_qual_status", lambda found, expected, failed: "merged")
+    monkeypatch.setattr(db, "apply_merge", lambda *a, **k: None)
+
+    result = handler.lambda_handler({}, None)
+
+    assert result["no_attachment"] == 0
+    assert result["merged"] == 1
+    assert fake_conn.rollback_calls == 1
 
 
 def test_cold_start_connection_failure_propagates_without_catching(monkeypatch):

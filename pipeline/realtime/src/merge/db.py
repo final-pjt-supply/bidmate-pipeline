@@ -92,6 +92,81 @@ def fetch_merge_targets(conn) -> list[dict]:
         return [dict(row) for row in cur.fetchall()]
 
 
+# --- 첨부 없는 공고 스윕(no_attachment) ------------------------------------
+# 첨부가 하나도 없는 공고는 추출 산출물이 영원히 안 생긴다. 그런데 병합 배치는
+# qualifications/daily/ 인벤토리에 있는 공고만 처리 대상으로 남기므로(handler의
+# #80 필터), 이런 공고는 대상에서 매번 조용히 빠지고 qual_status='pending'에
+# 영구히 고인다. 실제로 2026-08-06 daily에서 28건 중 7건이 이 상태였다.
+#
+# 이 행들은 "아직 안 왔다"가 아니라 "올 것이 없다"이므로 별도 종결 상태
+# no_attachment로 빼낸다. fetch_merge_targets가 pending/partial/failed만 보고,
+# 조회 API는 merged만 노출하므로(app/infra/db/repositories/bid_repository.py)
+# 새 값이 어디로도 새지 않는다.
+
+# daily 전용 가드. 백필 행(raw/raw/backfill/...)은 조원 소유라 이 배치가 절대
+# 건드리지 않는다(db/backfill_expected_file_count.py와 같은 원칙). LIKE 대신
+# strpos를 쓰는 이유는 psycopg2가 파라미터를 받는 순간 쿼리 안의 리터럴 %를
+# 플레이스홀더로 해석하기 때문이다 — 나중에 이 쿼리에 파라미터가 붙어도 조용히
+# 깨지지 않도록 %가 아예 없는 형태로 고정한다.
+DAILY_ONLY_SQL = "strpos(raw_s3_key, 'raw/raw/daily/') = 1"
+
+# expected_file_count = 0 만으로는 부족하다. 압축(zip) 첨부만 달린 공고도 수집
+# 시점엔 0으로 잡히는데, 다운로드 단계가 zip을 풀고 나서 값을 올려준다
+# (ingestion/json_file_download_daily.correct_expected_counts). 그 창을 그대로
+# 종결시키면 멀쩡한 공고가 사라진다. bid_attachments 행이 아예 없다는 조건을
+# 같이 걸어 "첨부 목록 자체가 빈 공고"로 좁힌다 — 이 경우엔 풀릴 zip도, 정정될
+# 개수도 없다. 적재 로더가 bid_table/bid_attachments를 한 트랜잭션에서 커밋하므로
+# (db/load_curated_backfill_to_rds.write_rows) 첨부 행이 아직 안 들어온 중간
+# 상태를 잘못 집을 위험도 없다.
+NO_ATTACHMENT_WHERE_SQL = f"""qual_status = 'pending'
+          AND is_human_verified = FALSE
+          AND expected_file_count = 0
+          AND {DAILY_ONLY_SQL}
+          AND NOT EXISTS (
+              SELECT 1 FROM bid_attachments a
+              WHERE a.bid_ntce_no = bid_table.bid_ntce_no
+                AND a.bid_ntce_ord = bid_table.bid_ntce_ord
+          )"""
+
+
+def _assert_daily_only(where_sql: str) -> None:
+    """daily 한정 조건이 실제로 조건절에 박혀 있는지 실행 직전 재확인한다.
+
+    이 스윕은 WHERE 하나에 전 테이블의 상태가 걸린 UPDATE라, 조건이 빠지면
+    백필 행까지 한 번에 갈아엎는다. 조용히 넘어가지 않고 즉시 실패시킨다.
+    """
+    if DAILY_ONLY_SQL not in where_sql:
+        raise RuntimeError(
+            "안전 가드 실패: no_attachment 스윕 조건절에 daily 한정 필터가 없다 — "
+            "백필 행까지 건드릴 위험이 있어 실행을 중단한다."
+        )
+
+
+def sweep_no_attachment(conn, dry_run: bool) -> int:
+    """첨부 목록이 빈 daily 공고를 pending에서 no_attachment로 확정하고 건수를 반환한다.
+
+    DRY_RUN=true면 UPDATE 대신 같은 조건으로 COUNT만 세어 "이번에 몇 건이
+    빠졌을지"를 로그로 남긴다(apply_merge의 dry-run 관례와 동일).
+    """
+    _assert_daily_only(NO_ATTACHMENT_WHERE_SQL)
+
+    if dry_run:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM bid_table WHERE {NO_ATTACHMENT_WHERE_SQL}")
+            count = cur.fetchone()[0]
+        logger.info("DRY_RUN — no_attachment 스윕 생략: 대상 %d건", count)
+        return count
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE bid_table SET qual_status = 'no_attachment', updated_at = NOW() "
+            f"WHERE {NO_ATTACHMENT_WHERE_SQL}"
+        )
+        count = cur.rowcount
+    conn.commit()
+    return count
+
+
 def has_failed_attachment(conn, bid_ntce_no: str, bid_ntce_ord: str) -> bool:
     """bid_attachments.status='failed'인 첨부가 있는지 확인한다(merge.logic.
     determine_qual_status의 has_failed_attachment 인자로 바로 넘길 값).

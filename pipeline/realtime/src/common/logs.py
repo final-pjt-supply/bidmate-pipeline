@@ -59,6 +59,8 @@ def log_process_skip(bid_id: str, document_id: str, reason: str) -> None:
 #   집계(#80, daily 전용 필터링 도입으로 각 단계 손실량을 추적하기 위해 추가)
 # - MERGE_NO_TARGETS       : DB 대상은 있었지만 daily 인벤토리에 하나도 안 걸려
 #   이번 회차에 처리할 게 없음(#80 — 예: 전부 백필 소관이거나 daily 파일 미도착)
+# - NO_ATTACHMENT_SWEEP    : 첨부가 아예 없어 pending에서 빼낸 공고 수
+#   (merge/db.sweep_no_attachment — 올 파일이 없는 공고를 종결시킨 건수)
 # - BATCH_SUMMARY          : 배치 1회 실행의 전체 집계(맨 마지막에 1번만)
 
 
@@ -87,6 +89,10 @@ def log_merge_target_funnel(db_total: int, daily_matched: int, after_cap: int) -
 
 def log_merge_no_targets(db_total: int) -> None:
     logger.info("MERGE_NO_TARGETS db_total=%d", db_total)
+
+
+def log_no_attachment_sweep(count: int) -> None:
+    logger.info("NO_ATTACHMENT_SWEEP count=%d", count)
 
 
 def log_batch_summary(

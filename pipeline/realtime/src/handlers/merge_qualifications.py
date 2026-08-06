@@ -40,6 +40,7 @@ from common.logs import (
     log_merge_skip,
     log_merge_start,
     log_merge_target_funnel,
+    log_no_attachment_sweep,
 )
 from merge import db, inventory
 from merge.logic import determine_qual_status, merge_qualification_documents
@@ -56,12 +57,14 @@ def lambda_handler(event, _context):
     conn = db.get_connection(config)
 
     tagged = _sweep_tags(conn, config)
+    no_attachment = _sweep_no_attachment(conn, config)
 
     targets = db.fetch_merge_targets(conn)
     if not targets:
         logger.info("처리 대상 없음 — 배치 종료")
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                "tagged": tagged, "conflict_bid_ids": [], "error_bid_ids": []}
+                "tagged": tagged, "no_attachment": no_attachment,
+                "conflict_bid_ids": [], "error_bid_ids": []}
 
     db_total = len(targets)
 
@@ -75,7 +78,8 @@ def lambda_handler(event, _context):
     if daily_matched == 0:
         log_merge_no_targets(db_total)
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                "tagged": tagged, "conflict_bid_ids": [], "error_bid_ids": []}
+                "tagged": tagged, "no_attachment": no_attachment,
+                "conflict_bid_ids": [], "error_bid_ids": []}
 
     max_targets = config["max_targets_per_run"]
     if len(targets) > max_targets:
@@ -133,7 +137,29 @@ def lambda_handler(event, _context):
         error_bid_ids=error_bid_ids,
     )
     return {"total": len(targets), **counts, "tagged": tagged,
+            "no_attachment": no_attachment,
             "conflict_bid_ids": conflict_bid_ids, "error_bid_ids": error_bid_ids}
+
+
+def _sweep_no_attachment(conn, config: dict) -> int:
+    """첨부가 아예 없는 daily 공고를 pending에서 빼낸다(merge.db 독스트링 참고).
+
+    태깅 스윕과 같은 이유로 통째로 감싼다 — 이 스윕이 실패한다고 이미 돌던
+    자격요건 병합까지 세울 이유가 없다. 실패해도 해당 행은 pending 그대로라
+    다음 주기가 자연스럽게 다시 집는다.
+    """
+    try:
+        swept = db.sweep_no_attachment(conn, config["dry_run"])
+        if swept:
+            log_no_attachment_sweep(swept)
+        return swept
+    except Exception:
+        logger.exception("no_attachment 스윕 실패 — 자격요건 병합은 그대로 진행")
+        try:
+            conn.rollback()
+        except Exception:
+            logger.error("no_attachment 스윕 실패 후 rollback도 실패 — 커넥션 손상 가능성", exc_info=True)
+        return 0
 
 
 def _sweep_tags(conn, config: dict) -> int:

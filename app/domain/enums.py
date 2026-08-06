@@ -24,6 +24,11 @@ class QualStatus(str, Enum):
     MERGED = "merged"
     PARTIAL = "partial"
     FAILED = "failed"
+    NO_ATTACHMENT = "no_attachment"
+    # 첨부가 아예 없는 공고. 추출할 파일이 없으니 산출물이 영원히 안 생기고,
+    # 그대로 두면 pending에 고여 "처리 대기 중"으로 잘못 집계된다. 실패가 아니라
+    # "올 것이 없어 끝난" 상태라 별도 값으로 종결시킨다
+    # (merge/db.sweep_no_attachment가 판정, determine_qual_status와 무관).
 
 
 class CompanySizeLimit(str, Enum):

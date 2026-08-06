@@ -12,9 +12,10 @@ from merge import db  # noqa: E402
 
 
 class FakeCursor:
-    def __init__(self, fetchall_result=None, fetchone_result=None):
+    def __init__(self, fetchall_result=None, fetchone_result=None, rowcount=0):
         self.fetchall_result = fetchall_result or []
         self.fetchone_result = fetchone_result
+        self.rowcount = rowcount
         self.executed: list[tuple] = []
 
     def execute(self, query, params=None):
@@ -132,6 +133,55 @@ def test_apply_merge_executes_update_and_commits_when_not_dry_run():
     assert "qual_status = %s, merged_at = NOW(), updated_at = NOW()" in query
     assert params[-3:] == ["merged", "R25BK01152374", "000"]
     assert conn.committed is True
+
+
+def test_sweep_no_attachment_updates_only_daily_pending_rows_without_attachments():
+    cursor = FakeCursor(rowcount=7)
+    conn = FakeConnection(cursor)
+
+    assert db.sweep_no_attachment(conn, dry_run=False) == 7
+
+    query, params = cursor.executed[0]
+    assert params is None
+    assert "UPDATE bid_table SET qual_status = 'no_attachment'" in query
+    assert "qual_status = 'pending'" in query          # partial/failed은 건드리지 않음
+    assert "is_human_verified = FALSE" in query        # 사람이 검토한 행은 제외
+    assert "expected_file_count = 0" in query
+    assert "NOT EXISTS" in query and "bid_attachments" in query
+    assert db.DAILY_ONLY_SQL in query                  # 백필 행 보호
+    assert conn.committed is True
+
+
+def test_sweep_no_attachment_dry_run_counts_without_updating():
+    cursor = FakeCursor(fetchone_result=(7,))
+    conn = FakeConnection(cursor)
+
+    assert db.sweep_no_attachment(conn, dry_run=True) == 7
+
+    query, _ = cursor.executed[0]
+    assert query.lstrip().startswith("SELECT COUNT(*)")
+    assert "UPDATE" not in query
+    assert conn.committed is False
+
+
+def test_sweep_no_attachment_refuses_to_run_without_daily_guard(monkeypatch):
+    """daily 한정 조건이 조건절에서 빠지면 백필 행까지 상태를 갈아엎는다 —
+    실행 직전에 알아채고 즉시 실패해야 한다."""
+    monkeypatch.setattr(db, "NO_ATTACHMENT_WHERE_SQL", "qual_status = 'pending'")
+    cursor = FakeCursor(rowcount=1)
+    conn = FakeConnection(cursor)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        db.sweep_no_attachment(conn, dry_run=False)
+
+    assert "daily" in str(exc_info.value)
+    assert cursor.executed == []
+
+
+def test_daily_only_sql_has_no_percent_placeholder_hazard():
+    """psycopg2는 파라미터가 붙는 순간 쿼리 안의 리터럴 %를 플레이스홀더로 읽는다.
+    LIKE 대신 strpos를 쓰는 이유이므로 %가 다시 새어들어오지 않게 못 박는다."""
+    assert "%" not in db.NO_ATTACHMENT_WHERE_SQL
 
 
 def test_to_db_value_wraps_list_and_dict_as_json():

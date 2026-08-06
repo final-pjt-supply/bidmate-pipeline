@@ -82,7 +82,8 @@ CREATE TABLE bid_table (
     -- 파이프라인 (내부)
     expected_file_count   INT DEFAULT 0,  -- 처리 대상 파일 수(다운로드 성공+지원 형식만)
     raw_s3_key            TEXT,
-    qual_status           VARCHAR(20) DEFAULT 'pending',  -- pending/merged/partial/failed
+    qual_status           VARCHAR(20) DEFAULT 'pending',  -- pending/merged/partial/failed/no_attachment
+                                        -- no_attachment: 첨부가 아예 없어 처리할 파일이 없는 공고(종결)
     created_at            TIMESTAMP DEFAULT NOW(),
     updated_at            TIMESTAMP DEFAULT NOW(),  -- UPDATE 시 코드에서 명시적 갱신 필요
     PRIMARY KEY (bid_ntce_no, bid_ntce_ord)
