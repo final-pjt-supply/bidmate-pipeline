@@ -40,6 +40,7 @@ from common.logs import (
     log_merge_skip,
     log_merge_start,
     log_merge_target_funnel,
+    log_late_attachment_recovered,
     log_no_attachment_sweep,
 )
 from merge import db, inventory
@@ -57,13 +58,14 @@ def lambda_handler(event, _context):
     conn = db.get_connection(config)
 
     tagged = _sweep_tags(conn, config)
-    no_attachment = _sweep_no_attachment(conn, config)
+    no_attachment, recovered = _sweep_attachment_states(conn, config)
 
     targets = db.fetch_merge_targets(conn)
     if not targets:
         logger.info("처리 대상 없음 — 배치 종료")
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
                 "tagged": tagged, "no_attachment": no_attachment,
+                "late_attachment_recovered": recovered,
                 "conflict_bid_ids": [], "error_bid_ids": []}
 
     db_total = len(targets)
@@ -79,6 +81,7 @@ def lambda_handler(event, _context):
         log_merge_no_targets(db_total)
         return {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
                 "tagged": tagged, "no_attachment": no_attachment,
+                "late_attachment_recovered": recovered,
                 "conflict_bid_ids": [], "error_bid_ids": []}
 
     max_targets = config["max_targets_per_run"]
@@ -138,28 +141,36 @@ def lambda_handler(event, _context):
     )
     return {"total": len(targets), **counts, "tagged": tagged,
             "no_attachment": no_attachment,
+            "late_attachment_recovered": recovered,
             "conflict_bid_ids": conflict_bid_ids, "error_bid_ids": error_bid_ids}
 
 
-def _sweep_no_attachment(conn, config: dict) -> int:
-    """첨부가 아예 없는 daily 공고를 pending에서 빼낸다(merge.db 독스트링 참고).
+def _sweep_attachment_states(conn, config: dict) -> tuple[int, int]:
+    """첨부 유무로 갈리는 두 상태 전이를 처리하고 (확정, 복구) 건수를 반환한다.
 
-    태깅 스윕과 같은 이유로 통째로 감싼다 — 이 스윕이 실패한다고 이미 돌던
-    자격요건 병합까지 세울 이유가 없다. 실패해도 해당 행은 pending 그대로라
-    다음 주기가 자연스럽게 다시 집는다.
+    복구를 먼저 돌린다 — 뒤늦게 첨부가 온 공고를 pending으로 되돌려두면 바로 밑
+    fetch_merge_targets가 같은 회차에 집어간다. 순서를 뒤집어도 두 조건이 서로
+    배타적이라(첨부 0개 vs 첨부 있음) 잘못 겹치지는 않지만, 한 주기를 버린다.
+
+    태깅 스윕과 같은 이유로 통째로 감싼다 — 이게 실패한다고 이미 돌던 자격요건
+    병합까지 세울 이유가 없다. 실패해도 해당 행은 상태가 그대로라 다음 주기가
+    자연스럽게 다시 집는다.
     """
     try:
+        recovered = db.recover_late_attachment(conn, config["dry_run"])
+        if recovered:
+            log_late_attachment_recovered(recovered)
         swept = db.sweep_no_attachment(conn, config["dry_run"])
         if swept:
             log_no_attachment_sweep(swept)
-        return swept
+        return swept, recovered
     except Exception:
-        logger.exception("no_attachment 스윕 실패 — 자격요건 병합은 그대로 진행")
+        logger.exception("첨부 상태 스윕 실패 — 자격요건 병합은 그대로 진행")
         try:
             conn.rollback()
         except Exception:
-            logger.error("no_attachment 스윕 실패 후 rollback도 실패 — 커넥션 손상 가능성", exc_info=True)
-        return 0
+            logger.error("첨부 상태 스윕 실패 후 rollback도 실패 — 커넥션 손상 가능성", exc_info=True)
+        return 0, 0
 
 
 def _sweep_tags(conn, config: dict) -> int:

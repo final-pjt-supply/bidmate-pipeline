@@ -25,10 +25,11 @@ class QualStatus(str, Enum):
     PARTIAL = "partial"
     FAILED = "failed"
     NO_ATTACHMENT = "no_attachment"
-    # 첨부가 아예 없는 공고. 추출할 파일이 없으니 산출물이 영원히 안 생기고,
-    # 그대로 두면 pending에 고여 "처리 대기 중"으로 잘못 집계된다. 실패가 아니라
-    # "올 것이 없어 끝난" 상태라 별도 값으로 종결시킨다
-    # (merge/db.sweep_no_attachment가 판정, determine_qual_status와 무관).
+    # ⚠ 폐기됨(2026-08-06). 첨부가 없는 공고를 잠깐 이 값으로 종결시켰다가,
+    # 서비스에 노출돼야 한다는 판단으로 merged로 바꿨다(merge/db.py 참고 —
+    # 조회 API가 merged만 노출하므로 별도 값으로는 영원히 안 보인다).
+    # 운영 DB에 그때 바뀐 행이 남아 있을 수 있어 값 자체는 남겨둔다. 병합 배치의
+    # 스윕이 회차마다 흡수하므로 전부 넘어간 뒤에는 지워도 된다.
 
 
 class CompanySizeLimit(str, Enum):

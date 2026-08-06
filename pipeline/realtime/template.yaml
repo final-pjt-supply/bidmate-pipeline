@@ -148,17 +148,20 @@ Parameters:
   # ============================================================
   MergeImageUri:
     Type: String
-    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:3269e86d296735bf5f516116de5bb36ccdbbd9af922aa713b3ebcd28db850092
+    Default: 890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:9845a7f89b24b52907e71958d8c7807df2e1b3c291f95d0a73914c0be113898a
     Description: >
       RDS 병합 배치 전용 이미지(ECR, #66, Dockerfile.merge). :latest 금지 —
       CloudFormation이 태그 변경을 감지 못해 이미지가 바뀌어도 재배포가 안 될 수
       있다. 이후 이미지를 다시 빌드/푸시할 때마다 이 Default를 새 digest로 갱신할 것.
-      현재 digest는 2026-08-06 푸시분(태그 noattach) — 첨부가 아예 없는 공고를
-      pending에서 no_attachment로 빼내는 스윕(merge/db.sweep_no_attachment)이
-      들어간 이미지. 이게 없으면 무첨부 공고가 daily 인벤토리 필터에 매번 걸러져
-      pending에 영구히 고인다.
-      직전 값은 2026-08-05 푸시분(sha256:c367ef60…, 태그 zipfix — expected_file_count
-      가 0일 때 merged 대신 pending을 유지하는 방어선).
+      현재 digest는 2026-08-06 푸시분(태그 noattach-merged) — 첨부가 아예 없는
+      공고를 merged로 확정하는 스윕(merge/db.sweep_no_attachment)과, 그 뒤 첨부가
+      도착하면 pending으로 되돌리는 복구(recover_late_attachment)가 들어간 이미지.
+      스윕이 없으면 무첨부 공고가 daily 인벤토리 필터에 매번 걸러져 pending에
+      영구히 고이고, 복구가 없으면 뒤늦게 첨부가 붙어도 merged로 굳어 자격요건을
+      영영 못 받는다. 둘은 한 쌍이라 따로 배포하지 말 것.
+      직전 값은 같은 날 푸시분(sha256:3269e86d…, 태그 noattach — 종결 상태를
+      no_attachment로 두던 1차 버전. 조회 API가 merged만 노출해 서비스에서 안
+      보인다는 문제로 하루 만에 대체됐다).
 
   MergeDbHost:
     Type: String

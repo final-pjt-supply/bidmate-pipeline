@@ -35,7 +35,15 @@ capabilities = "CAPABILITY_NAMED_IAM"
 # 첨부가 아예 없는 공고를 pending에서 no_attachment로 빼내는 스윕이 들어갔다
 # (merge/db.sweep_no_attachment). 무첨부 공고는 산출물이 안 생겨 daily 인벤토리
 # 필터에 매번 걸러지고, 그래서 병합 대상이 되지 못한 채 pending에 영구히 고인다.
-parameter_overrides ="ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:3a8cdb7562aa27b9ea2744a52712fb4d814d6079d1346dc7cdeba5fb458a26ec\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:3269e86d296735bf5f516116de5bb36ccdbbd9af922aa713b3ebcd28db850092\" TagMaxPerRun=\"500\""
+#
+# 2026-08-06(2차): MergeImageUri를 태그 noattach-merged로 갱신. 3269e86d -> 9845a7f8.
+# 종결 상태를 no_attachment가 아니라 merged로 바꾼다 — 조회 API 게이트가
+# qual_status='merged'라 별도 값으로 두면 서비스에서 영원히 안 보이는데, 이 공고들은
+# 첨부만 없을 뿐(대부분 수의계약) 마감·예산·기관이 다 있는 멀쩡한 공고다.
+# 같은 이미지에 역방향 복구(recover_late_attachment)가 함께 들어갔다. merged는 어떤
+# 배치도 다시 안 뽑는 종착점이라, 뒤늦게 첨부가 붙는 경로를 되돌릴 길이 없으면
+# 그 공고는 자격요건을 영영 못 받는다. 둘은 한 쌍이니 따로 배포하지 말 것.
+parameter_overrides ="ExtractorImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-extractor@sha256:3a8cdb7562aa27b9ea2744a52712fb4d814d6079d1346dc7cdeba5fb458a26ec\" LlmImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-llm@sha256:ce13b0f2d55c0e237837856a634672304e975b9fa23aa5e230c64c8f5b8c6ad3\" EmbeddingImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-embedding@sha256:d59020d34e420d2b5a3510c8b42df520f091bd0e08fa2b36dd3a75afe7126849\" SourceBucketName=\"bidmate\" LlmBaseUrl=\"https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1\" LlmModel=\"qwen.qwen3-next-80b-a3b\" MergeImageUri=\"890608337282.dkr.ecr.ap-northeast-2.amazonaws.com/bidding-agent-realtime-merge@sha256:9845a7f89b24b52907e71958d8c7807df2e1b3c291f95d0a73914c0be113898a\" TagMaxPerRun=\"500\""
 image_repositories = []
 
 [default.global.parameters]

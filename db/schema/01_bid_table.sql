@@ -82,8 +82,10 @@ CREATE TABLE bid_table (
     -- 파이프라인 (내부)
     expected_file_count   INT DEFAULT 0,  -- 처리 대상 파일 수(다운로드 성공+지원 형식만)
     raw_s3_key            TEXT,
-    qual_status           VARCHAR(20) DEFAULT 'pending',  -- pending/merged/partial/failed/no_attachment
-                                        -- no_attachment: 첨부가 아예 없어 처리할 파일이 없는 공고(종결)
+    qual_status           VARCHAR(20) DEFAULT 'pending',  -- pending/merged/partial/failed
+                                        -- 첨부가 아예 없는 공고도 merged로 확정한다(자격 18필드는 전부 NULL).
+                                        -- 즉 merged는 "자격요건을 다 채웠다"가 아니라 "더 처리할 첨부가 없다"는 뜻이다.
+                                        -- 실제 병합을 거쳤는지는 extraction_meta 채움 여부로 구분한다.
     created_at            TIMESTAMP DEFAULT NOW(),
     updated_at            TIMESTAMP DEFAULT NOW(),  -- UPDATE 시 코드에서 명시적 갱신 필요
     PRIMARY KEY (bid_ntce_no, bid_ntce_ord)

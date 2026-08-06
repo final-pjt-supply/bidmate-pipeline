@@ -135,7 +135,7 @@ def test_apply_merge_executes_update_and_commits_when_not_dry_run():
     assert conn.committed is True
 
 
-def test_sweep_no_attachment_updates_only_daily_pending_rows_without_attachments():
+def test_sweep_no_attachment_marks_daily_rows_without_attachments_as_merged():
     cursor = FakeCursor(rowcount=7)
     conn = FakeConnection(cursor)
 
@@ -143,8 +143,9 @@ def test_sweep_no_attachment_updates_only_daily_pending_rows_without_attachments
 
     query, params = cursor.executed[0]
     assert params is None
-    assert "UPDATE bid_table SET qual_status = 'no_attachment'" in query
-    assert "qual_status = 'pending'" in query          # partial/failed은 건드리지 않음
+    assert "UPDATE bid_table SET qual_status = 'merged'" in query
+    assert "merged_at" not in query                    # 병합한 적 없는 행에 시각을 박지 않음
+    assert "qual_status IN ('pending', 'no_attachment')" in query   # partial/failed은 제외
     assert "is_human_verified = FALSE" in query        # 사람이 검토한 행은 제외
     assert "expected_file_count = 0" in query
     assert "NOT EXISTS" in query and "bid_attachments" in query
@@ -152,11 +153,44 @@ def test_sweep_no_attachment_updates_only_daily_pending_rows_without_attachments
     assert conn.committed is True
 
 
-def test_sweep_no_attachment_dry_run_counts_without_updating():
+def test_sweep_absorbs_legacy_no_attachment_rows():
+    """2026-08-06 오전에 no_attachment로 바꿔놓은 362건이 스윕에 흡수돼야 한다 —
+    운영 DB가 VPC 안이라 손으로 마이그레이션할 수단이 없다."""
+    assert "'no_attachment'" in db.SWEEPABLE_STATUS_SQL
+    assert db.SWEEPABLE_STATUS_SQL in db.NO_ATTACHMENT_WHERE_SQL
+
+
+def test_recover_late_attachment_returns_rows_to_pending():
+    cursor = FakeCursor(rowcount=2)
+    conn = FakeConnection(cursor)
+
+    assert db.recover_late_attachment(conn, dry_run=False) == 2
+
+    query, _ = cursor.executed[0]
+    assert "UPDATE bid_table SET qual_status = 'pending'" in query
+    assert "qual_status = 'merged'" in query
+    # 실제 병합을 거친 행까지 되돌리면 무한 재처리에 빠진다
+    assert "extraction_meta IS NULL" in query
+    assert "expected_file_count > 0" in query
+    assert "EXISTS" in query and "bid_attachments" in query
+    assert db.DAILY_ONLY_SQL in query
+    assert conn.committed is True
+
+
+def test_sweep_and_recover_conditions_are_mutually_exclusive():
+    """같은 행이 두 조건에 동시에 걸리면 회차마다 merged↔pending을 오간다."""
+    assert "expected_file_count = 0" in db.NO_ATTACHMENT_WHERE_SQL
+    assert "expected_file_count > 0" in db.LATE_ATTACHMENT_WHERE_SQL
+    assert "NOT EXISTS" in db.NO_ATTACHMENT_WHERE_SQL
+    assert "AND EXISTS" in db.LATE_ATTACHMENT_WHERE_SQL
+
+
+@pytest.mark.parametrize("fn", [db.sweep_no_attachment, db.recover_late_attachment])
+def test_status_sweep_dry_run_counts_without_updating(fn):
     cursor = FakeCursor(fetchone_result=(7,))
     conn = FakeConnection(cursor)
 
-    assert db.sweep_no_attachment(conn, dry_run=True) == 7
+    assert fn(conn, dry_run=True) == 7
 
     query, _ = cursor.executed[0]
     assert query.lstrip().startswith("SELECT COUNT(*)")
@@ -164,7 +198,7 @@ def test_sweep_no_attachment_dry_run_counts_without_updating():
     assert conn.committed is False
 
 
-def test_sweep_no_attachment_refuses_to_run_without_daily_guard(monkeypatch):
+def test_status_sweep_refuses_to_run_without_daily_guard(monkeypatch):
     """daily 한정 조건이 조건절에서 빠지면 백필 행까지 상태를 갈아엎는다 —
     실행 직전에 알아채고 즉시 실패해야 한다."""
     monkeypatch.setattr(db, "NO_ATTACHMENT_WHERE_SQL", "qual_status = 'pending'")
@@ -178,10 +212,11 @@ def test_sweep_no_attachment_refuses_to_run_without_daily_guard(monkeypatch):
     assert cursor.executed == []
 
 
-def test_daily_only_sql_has_no_percent_placeholder_hazard():
+def test_sweep_conditions_have_no_percent_placeholder_hazard():
     """psycopg2는 파라미터가 붙는 순간 쿼리 안의 리터럴 %를 플레이스홀더로 읽는다.
     LIKE 대신 strpos를 쓰는 이유이므로 %가 다시 새어들어오지 않게 못 박는다."""
     assert "%" not in db.NO_ATTACHMENT_WHERE_SQL
+    assert "%" not in db.LATE_ATTACHMENT_WHERE_SQL
 
 
 def test_to_db_value_wraps_list_and_dict_as_json():

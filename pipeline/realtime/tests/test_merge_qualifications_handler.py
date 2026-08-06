@@ -56,6 +56,7 @@ def patch_config_and_connection(monkeypatch):
     # 같은 이유로 첨부 없는 공고 스윕도 기본은 꺼둔다 — 이 스윕은 아래 전용
     # 테스트에서만 켠다.
     monkeypatch.setattr(db, "sweep_no_attachment", lambda conn, dry_run: 0)
+    monkeypatch.setattr(db, "recover_late_attachment", lambda conn, dry_run: 0)
 
 
 def test_no_targets_short_circuits_without_building_inventory(monkeypatch):
@@ -321,15 +322,18 @@ def test_zero_daily_matched_logs_no_targets_and_returns_zero_summary(monkeypatch
         result = handler.lambda_handler({}, None)
 
     assert result == {"total": 0, "merged": 0, "partial": 0, "failed": 0, "skipped": 0,
-                       "tagged": 0, "no_attachment": 0,
+                       "tagged": 0, "no_attachment": 0, "late_attachment_recovered": 0,
                        "conflict_bid_ids": [], "error_bid_ids": []}
     assert apply_merge_calls == []
     assert any("MERGE_NO_TARGETS db_total=2" in r.message for r in caplog.records)
 
 
-def test_no_attachment_sweep_runs_before_target_selection(monkeypatch, caplog):
-    """첨부 없는 공고를 먼저 빼내야 그 행이 이번 회차 대상 목록에 안 섞인다."""
+def test_attachment_state_sweeps_run_before_target_selection(monkeypatch, caplog):
+    """복구가 스윕보다, 둘 다 대상 선정보다 먼저여야 한다 — 복구로 pending이 된
+    공고가 같은 회차에 처리되고, 첨부 없는 공고는 대상 목록에 안 섞인다."""
     order = []
+    monkeypatch.setattr(db, "recover_late_attachment",
+                         lambda conn, dry_run: (order.append("recover"), 2)[1])
     monkeypatch.setattr(db, "sweep_no_attachment",
                          lambda conn, dry_run: (order.append("sweep"), 7)[1])
 
@@ -342,23 +346,28 @@ def test_no_attachment_sweep_runs_before_target_selection(monkeypatch, caplog):
     with caplog.at_level("INFO"):
         result = handler.lambda_handler({}, None)
 
-    assert order == ["sweep", "fetch"]
+    assert order == ["recover", "sweep", "fetch"]
     assert result["no_attachment"] == 7
+    assert result["late_attachment_recovered"] == 2
     assert any("NO_ATTACHMENT_SWEEP count=7" in r.message for r in caplog.records)
+    assert any("LATE_ATTACHMENT_RECOVERED count=2" in r.message for r in caplog.records)
 
 
-def test_no_attachment_sweep_passes_dry_run_from_config(monkeypatch):
+def test_attachment_state_sweeps_pass_dry_run_from_config(monkeypatch):
     seen = {}
     monkeypatch.setattr(db, "sweep_no_attachment",
-                         lambda conn, dry_run: (seen.update(dry_run=dry_run), 0)[1])
+                         lambda conn, dry_run: (seen.update(sweep=dry_run), 0)[1])
+    monkeypatch.setattr(db, "recover_late_attachment",
+                         lambda conn, dry_run: (seen.update(recover=dry_run), 0)[1])
     monkeypatch.setattr(db, "fetch_merge_targets", lambda conn: [])
 
     handler.lambda_handler({}, None)
 
-    assert seen == {"dry_run": True}   # FAKE_CONFIG의 dry_run이 그대로 전달돼야 함
+    # FAKE_CONFIG의 dry_run이 두 스윕 모두에 그대로 전달돼야 함
+    assert seen == {"sweep": True, "recover": True}
 
 
-def test_no_attachment_sweep_failure_does_not_stop_batch(monkeypatch):
+def test_attachment_state_sweep_failure_does_not_stop_batch(monkeypatch):
     """스윕이 죽어도 자격요건 병합은 계속돼야 한다 — 이 스윕은 부가 기능이다."""
     fake_conn = FakeConn()
     monkeypatch.setattr(db, "get_connection", lambda config: fake_conn)
@@ -377,6 +386,7 @@ def test_no_attachment_sweep_failure_does_not_stop_batch(monkeypatch):
     result = handler.lambda_handler({}, None)
 
     assert result["no_attachment"] == 0
+    assert result["late_attachment_recovered"] == 0
     assert result["merged"] == 1
     assert fake_conn.rollback_calls == 1
 
