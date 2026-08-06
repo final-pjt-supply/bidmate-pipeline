@@ -64,12 +64,17 @@ def to_json_doc(
     }
 
 
-_DOC_NAME_RE = re.compile(r"^(?P<no>.+)_(?P<ord>[^_]+)_doc_?(?P<n>\d+)$")
+# 끝의 `_MM`은 압축 첨부에서 풀려나온 멤버다(`_docNN_MM`). 부모 docNo를 유지하고
+# 뒤에 순번을 붙이는 규칙이라 document_id도 "doc01_02" 형태가 된다 — realtime 쪽
+# paths.document_id_from_file_id가 만드는 값과 같은 형태다.
+# 이 패턴을 안 받으면 백필 handler가 "filename pattern mismatch"로 영구 실패시킨다.
+_DOC_NAME_RE = re.compile(r"^(?P<no>.+)_(?P<ord>[^_]+)_doc_?(?P<n>\d+(?:_\d+)?)$")
 
 
 def parse_doc_filename(stem: str) -> tuple[str, str] | None:
-    """확장자 없는 파일명 '{공고번호}_{차수}_doc{NN}'(또는 '_doc_{n}')을 파싱.
+    """확장자 없는 파일명 '{공고번호}_{차수}_doc{NN}'을 파싱.
 
+    '_doc_{n}'(구분자 형태)과 '_doc{NN}_{MM}'(압축 멤버)도 받는다.
     반환: (bid_id=f"{공고번호}_{차수}", document_id=f"doc{n}"; 숫자 원문 유지)
     형식이 맞지 않으면 None.
     """

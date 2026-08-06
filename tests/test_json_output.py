@@ -79,6 +79,17 @@ def test_parse_doc_filename_keeps_raw_digits():
     assert parse_doc_filename("A123_02_doc07")[1] == "doc07"
 
 
+def test_parse_doc_filename_zip_member():
+    """압축에서 풀려나온 멤버(`_docNN_MM`). 안 받으면 백필 handler가 영구 실패시킨다."""
+    assert parse_doc_filename("R26BK01260582_000_doc01_02") == (
+        "R26BK01260582_000",
+        "doc01_02",
+    )
+    assert parse_doc_filename("R26BK01447554_000_doc01_03")[1] == "doc01_03"
+
+
 def test_parse_doc_filename_bad_format_returns_none():
     assert parse_doc_filename("randomfile") is None
     assert parse_doc_filename("공고_차수_doc_x") is None
+    assert parse_doc_filename("A123_02_doc01_x") is None        # 멤버 순번이 숫자가 아님
+    assert parse_doc_filename("A123_02_doc01_02_03") is None    # 압축 깊이는 1단계까지만
