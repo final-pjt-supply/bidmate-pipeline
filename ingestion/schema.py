@@ -77,7 +77,7 @@ def _bdgt_amt(record):
     return None
 
 
-# 원본 camelCase → curated snake_case 1:1 매핑 (38개).
+# 원본 camelCase → curated snake_case 1:1 매핑 (39개).
 # 생성/주입/계산/묶음 필드(bid_id, bid_category, attachments, expected_file_count,
 # raw_s3_key, jntcontrct_duty_rgn_nm, cnstty_accot_shre_rate_list, subsi_cnstty, bdgt_amt)는
 # 여러 원본 필드나 외부 입력이 필요하므로 FIELD_MAP이 아니라 to_curated()에서 조립한다.
@@ -91,6 +91,9 @@ FIELD_MAP = {
     "ntce_instt_nm": ("ntceInsttNm", _txt),
     "dminstt_cd": ("dminsttCd", _txt),
     "dminstt_nm": ("dminsttNm", _txt),
+    # 공고종류(등록공고/재공고/취소공고/변경공고) — 취소공고는 같은 bidNtceNo에 차수만
+    # 올려서 오므로, 이 값이 취소공고 식별의 유일한 근거다(#122).
+    "ntce_kind_nm": ("ntceKindNm", _txt),
     # 플래그
     "re_ntce_yn": ("reNtceYn", _bool),
     "intrbid_yn": ("intrbidYn", _bool),
@@ -252,7 +255,7 @@ def _attachments(record):
 
 
 def to_curated(record, bid_category, raw_s3_key=None):
-    """원본 레코드 1건을 FIELD_DICTIONARY.md의 47개 필드로 변환한다.
+    """원본 레코드 1건을 FIELD_DICTIONARY.md의 48개 필드로 변환한다.
 
     bid_category: 출처 API 업무구분(thng/servc/cnstwk/frgcpt) — 수집기가 주입.
     raw_s3_key: 이 레코드의 원본 JSON이 저장된 S3 객체 키 — 수집기가 주입.
@@ -273,6 +276,7 @@ def to_curated(record, bid_category, raw_s3_key=None):
         "ntce_instt_nm": mapped["ntce_instt_nm"],
         "dminstt_cd": mapped["dminstt_cd"],
         "dminstt_nm": mapped["dminstt_nm"],
+        "ntce_kind_nm": mapped["ntce_kind_nm"],
         # 플래그
         "re_ntce_yn": mapped["re_ntce_yn"],
         "intrbid_yn": mapped["intrbid_yn"],
