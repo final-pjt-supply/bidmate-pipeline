@@ -13,6 +13,7 @@ CREATE TABLE bid_table (
     ntce_instt_nm      VARCHAR(200),           -- API: ntceInsttNm
     dminstt_cd         VARCHAR(10),            -- API: dminsttCd
     dminstt_nm         VARCHAR(200),           -- API: dminsttNm
+    ntce_kind_nm       VARCHAR(20),            -- API: ntceKindNm — 공고종류(등록공고/재공고/취소공고/변경공고). '취소공고'면 같은 bid_ntce_no 전체를 노출에서 제외(#122)
     re_ntce_yn         BOOLEAN,                -- API: reNtceYn ('Y'/'N' 변환)
     intrbid_yn         BOOLEAN,                -- API: intrbidYn ('Y'/'N' 변환)
     -- 일정

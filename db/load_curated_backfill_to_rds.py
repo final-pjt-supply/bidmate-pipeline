@@ -51,6 +51,7 @@ BID_TABLE_COLUMNS = (
     "ntce_instt_nm",
     "dminstt_cd",
     "dminstt_nm",
+    "ntce_kind_nm",
     "re_ntce_yn",
     "intrbid_yn",
     "bid_ntce_dt",
