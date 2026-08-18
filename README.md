@@ -1,176 +1,134 @@
-# bidding-agent
+# bidmate-pipeline
 
-조달 입찰공고를 자동으로 수집·분석하고, 회사의 사내 데이터와 대조하여 **참여 가능한(적합한) 공고만 골라주는** 멀티에이전트 시스템입니다.
+나라장터(조달청) 입찰공고를 **수집 → 첨부 추출 → LLM 자격요건 추출 → 임베딩·인덱싱 → RDS 병합**까지
+자동으로 처리하는 데이터 파이프라인입니다. 서빙 API(`bidmate-backend`)와 프론트(`bidmate-frontend`)가
+읽는 `bid_table`·`bid_attachments`·`bid_tags`와 OpenSearch 인덱스를 이 레포가 채웁니다.
 
----
+- **실시간 경로**: 5분 주기 Airflow 수집 → S3 이벤트 → SQS+Lambda 체인 (신규 공고)
+- **백필 경로**: 과거 공고 대량 처리 — S3 Batch Operations로 같은 추출·LLM 로직을 일괄 실행
 
-## 배경 & 목적
+## 역할 분담
 
-입찰을 희망하는 기업은 자신이 참여 가능한 공고를 찾는 데 막대한 시간과 인력을 소모합니다. 제안요청서(RFP), 기술요구사항, 입찰 자격 요건 등을 일일이 읽고 자사가 해당되는지 직접 판단해야 하기 때문입니다.
+| 이름 | 담당 |
+|---|---|
+| **주대성** | PDF 파싱 · 실시간 파이프라인(청킹·임베딩·인덱싱, LLM 자격요건 추출) · AWS 아키텍처(SQS+Lambda) 설계 |
+| **이종범** | HWP·HWPX 파싱 · 백필 데이터 처리 |
+| **고준섭** | 첨부파일 다운로드 파이프라인 |
+| **강태주** | 나라장터 API 원본 수집·적재 파이프라인 |
+| **김승재** | DB 구조 설계·구축 |
 
-이 프로젝트는 **회사의 데이터(보유 실적, 자격, 인증, 규모 등)를 미리 입력해두면, 에이전트가 신규 입찰공고를 분석해 적합 여부를 자동으로 판단하고 적합한 공고만 추천**하는 것을 목표로 합니다.
-
----
-
-## 핵심 기능
-
-- 조달 API에서 입찰공고를 주기적으로 수집·저장
-- 공고 첨부파일(HWP·PDF) 자동 다운로드 및 PDF 변환
-- LLM으로 공고 문서에서 필요한 항목만 구조화 추출
-- 추출 내용을 벡터 DB(OpenSearch)에 임베딩 저장
-- 멀티에이전트가 사내 데이터 + 공고 DB를 교차 검색해 적합도 판정
-- 적합 판단을 **(1) 입찰 자격**과 **(2) 커트라인** 두 단계로 수행
-
----
-
-## 시스템 아키텍처
+## 아키텍처
 
 ```mermaid
 flowchart TD
-    A[조달 API] -->|입찰공고 JSON 수집| B[S3<br/>원본 저장 / Parquet 변환]
-    B -->|HWP·PDF URL + 메타데이터 추출| C[메타데이터 저장]
-    C -->|첨부파일 다운로드| D[파일 저장소]
-    D -->|HWP → PDF 변환| E[PDF 정규화]
-    E -->|LLM 추출: 자격·요구사항·커트라인 등| F[(OpenSearch<br/>Vector DB)]
-
-    subgraph Agents[멀티에이전트]
-        G[유사도 조회 에이전트]
-        H[RAG 조회 에이전트]
-        I[적합도 판정 에이전트]
-    end
-
-    F --> G
-    J[(사내 데이터<br/>실적·자격·인증·규모)] --> H
-    G --> I
-    H --> I
-    I -->|적합 공고 출력| K[추천 결과]
+    A[나라장터 OpenAPI] -->|5분 주기 수집<br/>Airflow on EC2| B[(S3 raw/curated)]
+    B -->|첨부 다운로드<br/>hwpx>hwp>pdf 중복제거| C[(S3 raw/downloads)]
+    B -->|메타데이터 upsert| R[(RDS bid_table<br/>bid_attachments)]
+    C -->|S3 이벤트| Q1{{SQS 확장자별 3종}}
+    Q1 --> L1[extract-pdf/hwp/hwpx<br/>Lambda]
+    L1 -->|추출 텍스트| D[(S3 extracted/)]
+    L1 --> Q2{{SQS llm-extract}}
+    L1 --> Q3{{SQS embed}}
+    Q2 --> L2[llm-extract Lambda<br/>Bedrock qwen3-next-80b]
+    L2 -->|자격요건 JSON| E[(S3 qualifications/)]
+    Q3 --> L3[embed Lambda<br/>Cloudflare BGE-M3]
+    L3 --> Q4{{SQS index}}
+    Q4 --> L4[index Lambda<br/>VPC 내부]
+    L4 --> OS[(OpenSearch<br/>bid_chunks)]
+    M[merge Lambda<br/>EventBridge 5분 주기] -->|qualifications 병합<br/>+ bid_tags 태깅| R
+    E -.-> M
 ```
 
----
+전 구간 비동기·이벤트 드리븐이며, 각 SQS 큐는 DLQ를 가집니다. 실패한 적재는 커서가
+전진하지 않아 다음 실행이 자동 재처리합니다(self-healing).
 
-## 데이터 파이프라인
+## 데이터 흐름
 
-전체 흐름은 수집 → 정제 → 추출 → 적재 → 판단의 5단계로 구성됩니다.
+1. **수집** — `bidding_daily_pipeline` DAG(5분 주기, EC2 Airflow)이 나라장터 OpenAPI를 호출해
+   원본 113필드를 `raw/raw/daily/`에, 47필드 큐레이션본을 `raw/curated/daily/`에 저장.
+   30분 이상 수집 공백은 따라잡지 않고 gap 매니페스트로 기록 후 커서 리셋.
+2. **첨부 다운로드** — 확장자 우선순위(hwpx > hwp > pdf)로 중복 제거, zip 해제,
+   DRM(`SCDS`) 차단 후 `raw/downloads/daily/.../{bid_id}/{bid_id}_docNN.ext`로 익명화 저장.
+3. **메타데이터 적재** — `db/load_curated_daily_to_rds.py`가 `bid_table`·`bid_attachments`에
+   증분 upsert. RDS 전용 커서를 별도로 둬서 적재 실패 구간을 자동 재처리.
+4. **텍스트 추출** — S3 이벤트 → 확장자별 SQS → `realtime-extract-{pdf,hwp,hwpx}` Lambda가
+   페이지 단위 JSON으로 추출(`extracted/`), 이후 LLM 큐와 임베딩 큐에 동시 발행.
+5. **자격요건 추출(LLM)** — `realtime-llm-extract` Lambda가 Bedrock(`qwen3-next-80b`,
+   OpenAI 호환 엔드포인트)으로 자격요건 18개 항목을 근거(evidence)와 함께 구조화 추출
+   (`qualifications/`).
+6. **임베딩·인덱싱** — 청킹 후 Cloudflare Workers AI(BGE-M3)로 임베딩(`vectors/`) →
+   VPC 내부 index Lambda가 OpenSearch `bid_chunks`에 벌크 인덱싱. 본문 검색은 OpenSearch,
+   메타데이터는 Postgres가 담당.
+7. **병합** — `realtime-merge` Lambda(EventBridge 5분 주기)가 `qual_status`가
+   pending/partial/failed인 공고의 첨부별 추출 결과를 병합 규칙(텍스트는 최장값,
+   enum/수치는 근거 우선, 지역·배점은 그룹 원자성)으로 합쳐 `bid_table`의 자격요건
+   18컬럼을 갱신. 같은 Lambda가 `bid_tags` 품목 태깅도 수행.
+8. **통계** — `bid_stats_refresh` DAG(매일 04:00 KST)이 `/stats` 화면용
+   materialized view(`institution_parent`, `bid_stats`)를 갱신.
 
-**1. 공고 수집 (조달 API → S3)**
-조달 API를 호출해 입찰공고를 JSON으로 받아 S3에 저장합니다. 대용량·반복 분석을 고려해 Parquet 변환 적재 여부를 함께 검토합니다.
+**백필 경로**: 과거 공고는 비동기 수집기(호출 예산 95,000건)로 `*/backfill/` 프리픽스에
+적재 후, S3 Batch Operations가 확장자별 추출 Lambda와 LLM Lambda(Bedrock Converse)를
+매니페스트 기반으로 일괄 호출합니다. 실시간과 같은 파싱 라이브러리를 공유합니다.
 
-**2. 메타데이터·첨부 URL 추출**
-S3에 저장된 공고 데이터에서 HWP·PDF 첨부파일의 다운로드 URL과 공고번호, 기관명, 마감일 등 기타 메타데이터를 추출해 저장합니다.
+## 디렉터리
 
-**3. 첨부파일 다운로드**
-추출한 URL로 첨부파일(HWP·PDF)을 내려받아 저장소에 보관합니다.
+| 디렉터리 | 역할 |
+|---|---|
+| `ingestion/` | 나라장터 API 수집기 + Airflow DAG 2종 + docker-compose (EC2 운영) |
+| `pipeline/realtime/` | 실시간 SAM 스택 — Lambda 7종, SQS 6쌍(+DLQ), CloudWatch 알람 10종 |
+| `pipeline/backfill/` | 백필 LLM 추출 SAM 스택 (S3 Batch 호출) |
+| `backfill_lambda/` | 백필 텍스트 추출 Lambda 3종 + 매니페스트 생성 (루트 `template.yaml`) |
+| `parsing/` | HWP·HWPX·HWPML·PDF 추출 라이브러리 (실시간·백필 공용) |
+| `db/` | 스키마 SSOT(`db/schema/*.sql`) + RDS 적재·백필 스크립트 |
+| `clustering/` | 품목 태깅 모델 학습 실험 — 산출물을 실시간 태거가 사용 |
+| `embedding/`, `experiments/` | 청킹·임베딩·검색 품질 실험 (BM25/kNN/하이브리드 평가) |
+| `alembic/` | API 소유 테이블 전용 마이그레이션 (`bid_table` 등 파이프라인 소유 테이블은 제외) |
+| `tests/` + 각 스택별 `tests/` | 추출기·라우터·병합 로직·핸들러 단위/통합 테스트 |
 
-**4. 문서 정규화 (HWP → PDF)**
-분석 일관성을 위해 HWP 파일을 PDF로 변환하여 모든 문서를 동일한 형식으로 맞춥니다.
+`preprocessing/`·`agents/`·`transforming/`·`loading/`은 초기 스캐폴딩 또는 실시간 스택으로
+대체된 레거시입니다.
 
-**5. 핵심 정보 추출 & 벡터 적재**
-전체 PDF에서 LLM으로 입찰 자격, 기술요구사항, 평가 커트라인 등 필요한 항목만 구조화하여 추출하고, 임베딩 후 OpenSearch 벡터 DB에 저장합니다.
+## AWS 구성 (v1 운영 기준)
 
----
+| 서비스 | 용도 |
+|---|---|
+| S3 (`bidmate`) | 원본·큐레이션·첨부·추출·자격요건·벡터 전 단계 저장소 (Hive 스타일 파티션) |
+| EC2 | Airflow 2.10 (LocalExecutor, docker-compose) |
+| Lambda | 실시간 7종 + 백필 4종, 전부 ECR 컨테이너 이미지(digest 고정) |
+| SQS | 확장자별 추출 3 + LLM + 임베딩 + 인덱싱, 각 큐에 DLQ |
+| EventBridge | 병합 배치 5분 주기 트리거 |
+| S3 Batch Operations | 백필 대량 추출·LLM 호출 |
+| RDS PostgreSQL | `bid_table`·`bid_attachments`·`bid_tags` + 통계 matview |
+| Bedrock | 자격요건 추출 LLM (`qwen.qwen3-next-80b-a3b`, us-east-1) |
+| OpenSearch | 공고 본문 청크 벡터·키워드 검색 (`bid_chunks`, VPC 내부) |
+| Cloudflare Workers AI | BGE-M3 임베딩 (외부 API — embed Lambda가 VPC 밖인 이유) |
+| CloudWatch + SNS | DLQ 적체·LLM 백로그·병합 오류 알람 10종 + 수집 헬스체크(heartbeat) 알람 |
 
-## 멀티에이전트 구조
+운영 시 주의 두 가지:
 
-세 개의 에이전트가 역할을 나눠 적합 공고를 도출합니다.
+- ECR 이미지는 digest로 고정한다 — 푸시 때마다 `template.yaml` 기본값과 `samconfig.toml`을
+  함께 갱신해야 한다(`:latest` 사용 시 조용히 구버전으로 롤백된 사례 있음).
+- 병합 Lambda는 `DryRun=true`가 기본값이다. 실쓰기는
+  `--parameter-overrides DryRun=false` 배포에서만 일어난다.
 
-### 1. 유사도 조회(검색) 기반 에이전트
-벡터 DB에 저장된 공고 임베딩과 회사의 사업 영역·키워드를 **의미 기반 유사도**로 비교해, 우선 검토할 후보 공고를 빠르게 좁힙니다.
-
-### 2. RAG 조회 에이전트
-후보 공고에 대해 사내 데이터(보유 실적, 자격증, 인증, 기업 규모 등)와 공고 원문을 검색·결합하여, 판단에 필요한 **근거 컨텍스트**를 구성합니다.
-
-### 3. 적합도 판정 에이전트
-RAG가 모은 근거를 바탕으로 최종 적합 여부를 판단하고, 적합한 공고를 출력합니다. 판단은 두 단계로 진행됩니다.
-
-- **입찰 자격 판단**: 공고가 요구하는 필수 자격(면허, 인증, 실적 요건, 지역 제한 등)을 회사가 충족하는지 확인
-- **커트라인 판단**: 평가 항목·배점 기준에서 회사가 통과선(커트라인)을 넘길 수 있는지 추정
-
----
-
-## 적합도 판단 로직
-
-```
-공고 후보
-  └─ ① 입찰 자격 판단
-        ├─ 미충족 → 제외
-        └─ 충족 → ② 커트라인 판단
-                    ├─ 미달 예상 → 보류/제외
-                    └─ 통과 예상 → 적합 공고로 추천
-```
-
-자격을 만족하지 못하면 즉시 제외하여 불필요한 분석을 줄이고, 자격을 통과한 공고만 커트라인 평가로 넘겨 효율을 높입니다.
-
----
-
-## 기술 스택
-
-| 영역 | 사용 기술 |
-|------|-----------|
-| 데이터 수집 | 조달 API |
-| 스토리지 | AWS S3 (원본 / Parquet) |
-| 문서 처리 | HWP → PDF 변환, PDF 파싱 |
-| 정보 추출 | LLM |
-| 벡터 DB | OpenSearch |
-| 에이전트 | 멀티에이전트 (유사도 조회 / RAG / 적합도 판정) |
-
-> 구체적 프레임워크·모델명은 구현 확정 시 업데이트 예정입니다.
-
----
-
-## 디렉토리 구조 (예시)
-
-```
-.
-├── ingestion/        # 조달 API 수집, S3 적재
-├── preprocessing/    # 메타데이터 추출, 다운로드, HWP→PDF 변환
-├── extraction/       # LLM 기반 항목 추출
-├── indexing/         # 임베딩 및 OpenSearch 적재
-├── agents/
-│   ├── similarity_agent.py   # 유사도 조회 에이전트
-│   ├── rag_agent.py          # RAG 조회 에이전트
-│   └── suitability_agent.py  # 적합도 판정 에이전트
-├── data/             # 사내 데이터 (실적·자격·인증 등)
-└── README.md
-```
-
----
-
-## 시작하기
+## 실행
 
 ```bash
-# 1. 의존성 설치
-pip install -r requirements.txt
+# Airflow (EC2 또는 로컬)
+cd ingestion && docker compose up -d        # UI: :8080
 
-# 2. 환경변수 설정 (.env)
-#    조달 API 키, AWS 자격증명, OpenSearch 엔드포인트, LLM API 키 등
+# 실시간 스택 배포
+cd pipeline/realtime && sam build && sam deploy
 
-# 3. 파이프라인 실행 (수집 → 적재)
-python -m ingestion.run
-
-# 4. 에이전트 실행 (적합 공고 추천)
-python -m agents.run --company data/company_profile.json
+# 테스트
+pytest tests/ pipeline/realtime/tests/ pipeline/backfill/tests/
 ```
 
-### 필요한 환경변수 (예시)
+파이프라인 상태 점검: `pipeline/realtime/scripts/pipeline_status.py`가 bid_id 하나가
+어느 단계(S3 프리픽스)까지 진행됐는지 교차 확인합니다.
 
-```
-PROCUREMENT_API_KEY=      # 조달 API 키
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-S3_BUCKET=
-OPENSEARCH_ENDPOINT=
-LLM_API_KEY=
-```
+## 관련 레포
 
----
-
-## 향후 계획
-
-- 공고 수집 자동 스케줄링(주기적 배치)
-- 추천 결과에 대한 근거·점수 시각화
-- 사내 데이터 입력 UI
-- 적합도 판단 정확도 평가셋 구축
-
----
-
-*본 README는 프로젝트 설계안을 기준으로 작성되었으며, 구현이 진행되며 갱신됩니다.*
+- [`bidmate-backend`](https://github.com/final-pjt-supply/bidmate-backend) — 이 파이프라인이 채운 데이터를 서빙하는 API
+- [`bidmate-frontend`](https://github.com/final-pjt-supply/bidmate-frontend) — 화면
+- [`bidmate-ai-agent`](https://github.com/final-pjt-supply/bidmate-ai-agent) — 대화 에이전트·매칭
