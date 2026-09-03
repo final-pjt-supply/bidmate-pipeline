@@ -1,5 +1,8 @@
 # bidmate-pipeline
 
+> **아카이브 안내** — 2026년 8월까지 AWS에서 실제 운영한 서비스입니다. 현재는 AWS 인프라를
+> 정리해 운영을 종료했으며, 이 문서는 v1 운영 당시의 아키텍처 기록입니다.
+
 나라장터(조달청) 입찰공고를 **수집 → 첨부 추출 → LLM 자격요건 추출 → 임베딩·인덱싱 → RDS 병합**까지
 자동으로 처리하는 데이터 파이프라인입니다. 서빙 API(`bidmate-backend`)와 프론트(`bidmate-frontend`)가
 읽는 `bid_table`·`bid_attachments`·`bid_tags`와 OpenSearch 인덱스를 이 레포가 채웁니다.
@@ -82,11 +85,19 @@ flowchart TD
 | `db/` | 스키마 SSOT(`db/schema/*.sql`) + RDS 적재·백필 스크립트 |
 | `clustering/` | 품목 태깅 모델 학습 실험 — 산출물을 실시간 태거가 사용 |
 | `embedding/`, `experiments/` | 청킹·임베딩·검색 품질 실험 (BM25/kNN/하이브리드 평가) |
-| `alembic/` | API 소유 테이블 전용 마이그레이션 (`bid_table` 등 파이프라인 소유 테이블은 제외) |
-| `tests/` + 각 스택별 `tests/` | 추출기·라우터·병합 로직·핸들러 단위/통합 테스트 |
+| `tests/` + 각 스택별 `tests/` | 추출기·라우터·병합 로직·핸들러 단위/통합 테스트 (`tests/api/`는 아래 레거시 참고) |
 
-`preprocessing/`·`agents/`·`transforming/`·`loading/`은 초기 스캐폴딩 또는 실시간 스택으로
-대체된 레거시입니다.
+### 레거시 (기록 보존)
+
+팀원별 작업 이력을 보존하기 위해 삭제하지 않고 남겨둔 코드입니다. 현재 파이프라인은
+사용하지 않습니다.
+
+| 경로 | 상태 |
+|---|---|
+| `app/` · `tests/api/` · `alembic/` · `alembic.ini` | 서빙 API 초기 버전(#84) — [`bidmate-backend`](https://github.com/final-pjt-supply/bidmate-backend)로 이관되어 그쪽에서 계속 발전했고, 이 레포 쪽은 동결 상태 |
+| `loading/` | 자격요건 S3→RDS 적재 로더 초기 버전 — 실시간 merge Lambda로 대체 |
+| `transforming/` | HWP→PDF 변환 실험 스크립트 |
+| `preprocessing/` · `agents/` · `data/` | 초기 폴더 구조 스캐폴딩 (빈 폴더) |
 
 ## AWS 구성 (v1 운영 기준)
 
